@@ -19,7 +19,7 @@ from beobachter import Beobachter
 # === Simulations-Parameter ===
 MAX_POINTER = 2000
 VERFALL_RATE = 100
-ANALYSE_INTERVALL = 5  # Sekunden
+ANALYSE_INTERVALL = 2  # Sekunden
 
 # === Globaler Zustand ===
 sim_lock = threading.Lock()
@@ -33,7 +33,7 @@ sim_daten = {
     "startzeit": 0,
 }
 letztes_ergebnis = {}
-historie = []  # Letzte 360 Datenpunkte (30 min bei 5s)
+historie = []  # Letzte 900 Datenpunkte (30 min bei 2s)
 sim_laeuft = True
 
 
@@ -147,7 +147,7 @@ def analyse_thread():
             })
 
             # Max 360 Einträge behalten
-            while len(historie) > 360:
+            while len(historie) > 900:
                 historie.pop(0)
 
         except Exception as e:
@@ -518,7 +518,7 @@ async function refresh(){
 }
 
 refresh();
-setInterval(refresh,5000);
+setInterval(refresh,2000);
 </script>
 </body>
 </html>"""
