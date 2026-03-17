@@ -95,13 +95,17 @@ class ExecutionPointer:
             quelle = r[arg2 % 4]
             ziel_adr = r[arg3 % 4]
             for i in range(anzahl):
+                ziel_pos = (ziel_adr + i) % SPEICHER_GROESSE
+                # Materie-Exklusion: nur auf leere Bytes schreiben
+                if welt.lesen(ziel_pos) != 0:
+                    continue
                 byte_original = welt.lesen((quelle + i) % SPEICHER_GROESSE)
                 byte = byte_original
                 if random.randint(1, MUTATIONSRATE) == 1:
                     byte = random.randint(0, 255)
                     if byte != byte_original:
                         self.mutationen.append((i, quelle, ziel_adr, byte_original, byte))
-                welt.schreiben((ziel_adr + i) % SPEICHER_GROESSE, byte)
+                welt.schreiben(ziel_pos, byte)
             # Physik: Kopierter Code >= 20 Bytes wird lebendig
             if anzahl >= 20:
                 self.neue_pointer.append(ziel_adr % SPEICHER_GROESSE)

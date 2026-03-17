@@ -4,6 +4,7 @@ Laesst die Simulation 5.000 Ticks laufen und analysiert warum alles stirbt.
 """
 
 import sys
+import random
 from collections import defaultdict
 
 import interpreter
@@ -13,6 +14,7 @@ from ur_replikator import erzeuge_ur_replikator
 
 TICKS = 3_000
 MAX_POINTER = 300
+VERFALL_RATE = 100
 
 
 def main():
@@ -105,6 +107,10 @@ def main():
 
         pointer = [p for p in pointer if p.aktiv]
         pointer.extend(neue_pointer)
+
+        # === Verfall: Zufällige Bytes zerfallen zu 0 ===
+        for _ in range(VERFALL_RATE):
+            welt.schreiben(random.randint(0, SPEICHER_GROESSE - 1), 0)
 
         # Timeline
         if tick % 100 == 0:

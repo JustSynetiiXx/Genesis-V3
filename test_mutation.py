@@ -1,7 +1,11 @@
 """
 Genesis v3 — Test: Mutation beim Kopieren
-Setzt Mutationsrate auf 1/10 (hoch), lässt den Ur-Replikator 5 Mal kopieren,
-prüft dass mindestens eine Kopie sich vom Original unterscheidet.
+Setzt Mutationsrate auf 1/10 (hoch), lässt den Ur-Replikator kopieren,
+prüft dass die Kopie sich vom Original unterscheidet.
+
+Hinweis: Durch Materie-Exklusion kann ein Pointer nur einmal an eine
+leere Zieladresse kopieren. Danach sind die Bytes != 0 und werden
+übersprungen. Der Test prüft daher nur die erste Kopie.
 """
 
 import interpreter
@@ -28,39 +32,33 @@ def test_mutation():
         print(f"Mutationsrate: 1/{interpreter.MUTATIONSRATE}")
         print(f"Erwartete Mutationen pro Kopie: ~{code_len / interpreter.MUTATIONSRATE:.1f}\n")
 
-        # Pointer starten, genug Energie für 5 Kopier-Zyklen
+        # Pointer starten — genug Energie für einen Kopier-Zyklus
         pointer = ExecutionPointer(0)
-        pointer.energie = 5000
+        pointer.energie = 200
         while pointer.schritt(welt):
             pass
 
-        # Prüfe die ersten 5 Kopien
+        # Prüfe die erste Kopie
         original = list(code)
-        gefundene_mutationen = 0
-        mindestens_eine_kopie_anders = False
+        start = code_len
+        kopie = [welt.speicher[start + i] for i in range(code_len)]
 
-        for kopie_nr in range(5):
-            start = code_len * (kopie_nr + 1)
-            kopie = [welt.speicher[start + i] for i in range(code_len)]
+        unterschiede = []
+        for i in range(code_len):
+            if original[i] != kopie[i]:
+                unterschiede.append((i, original[i], kopie[i]))
 
-            unterschiede = []
-            for i in range(code_len):
-                if original[i] != kopie[i]:
-                    unterschiede.append((i, original[i], kopie[i]))
+        print(f"Kopie 1 (Bytes {start}-{start + code_len - 1}): "
+              f"{len(unterschiede)} Mutation(en)")
+        for byte_pos, alt, neu in unterschiede:
+            print(f"  Byte {byte_pos}: {alt} → {neu}")
 
-            if unterschiede:
-                mindestens_eine_kopie_anders = True
+        # Prüfe auch die gemeldeten Mutationen vom Interpreter
+        print(f"\nInterpreter-gemeldete Mutationen: {len(pointer.mutationen)}")
+        for byte_idx, quelle, ziel, alt, neu in pointer.mutationen:
+            print(f"  Byte {byte_idx}: {alt} → {neu} (Kopie von {quelle} nach {ziel})")
 
-            gefundene_mutationen += len(unterschiede)
-
-            print(f"Kopie {kopie_nr + 1} (Bytes {start}-{start + code_len - 1}): "
-                  f"{len(unterschiede)} Mutation(en)")
-            for byte_pos, alt, neu in unterschiede:
-                print(f"  Byte {byte_pos}: {alt} → {neu}")
-
-        print(f"\nGesamt: {gefundene_mutationen} Mutationen in 5 Kopien")
-
-        if mindestens_eine_kopie_anders:
+        if unterschiede:
             print("\n=== PASS === Mutationen wurden korrekt erzeugt!")
             return True
         else:

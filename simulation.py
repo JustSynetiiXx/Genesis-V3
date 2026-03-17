@@ -9,6 +9,7 @@ Stoppen: Ctrl+C
 
 import time
 import sys
+import random
 
 from welt import Welt, SPEICHER_GROESSE
 from interpreter import ExecutionPointer, ENDE
@@ -18,6 +19,7 @@ LOG_INTERVALL = 10          # Sekunden
 MAX_MUTATIONS_LOG = 100     # Erste N Mutationen einzeln loggen
 MAX_EVENTS_LOG = 500        # Erste N Geburten/Tode einzeln loggen
 MAX_POINTER = 2000          # Populationslimit — begrenzter Lebensraum
+VERFALL_RATE = 100          # Bytes die pro Tick zufällig auf 0 gesetzt werden
 
 
 def genom_hex(speicher, adresse):
@@ -170,6 +172,10 @@ def main():
             # Tote entfernen, Neue hinzufuegen
             pointer = [p for p in pointer if p.aktiv]
             pointer.extend(neue_pointer)
+
+            # === Verfall: Zufällige Bytes zerfallen zu 0 ===
+            for _ in range(VERFALL_RATE):
+                welt.schreiben(random.randint(0, SPEICHER_GROESSE - 1), 0)
 
             # === Periodisches Logging ===
             jetzt = time.time()
