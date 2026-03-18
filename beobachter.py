@@ -5,6 +5,9 @@ Wie ein Mikroskop — beobachtet, aber beeinflusst nicht.
 """
 
 import math
+import json
+import os
+import time
 from collections import Counter
 
 from welt import SPEICHER_GROESSE
@@ -152,3 +155,108 @@ class Beobachter:
             "pointer_positionen": pointer_positionen,
             "tick_nummer": self.sim_daten.get("tick", 0),
         }
+
+    def analyse_wahrnehmung(self):
+        """Suche nach Organismen mit LESEN_EXTERN → VERGLEICHEN_SPRINGEN Muster."""
+        pointer = self.pointer_liste
+        speicher = self.welt.speicher
+
+        organismen_mit_muster = []
+
+        for p in pointer:
+            if not p.aktiv:
+                continue
+
+            # Genom extrahieren als Liste von (opcode, anweisung_bytes)
+            anweisungen = []
+            for i in range(0, 1024, 4):
+                pos = (p.startadresse + i) % SPEICHER_GROESSE
+                opcode = speicher[pos]
+                instr = [speicher[(pos + j) % SPEICHER_GROESSE] for j in range(4)]
+                anweisungen.append(instr)
+                if opcode == 9:  # ENDE
+                    break
+
+            # Suche LESEN_EXTERN (6) gefolgt von VERGLEICHEN_SPRINGEN (4) in max 3 Anweisungen
+            muster_gefunden = None
+            for idx, instr in enumerate(anweisungen):
+                if instr[0] == 6:  # LESEN_EXTERN
+                    for offset in range(1, min(4, len(anweisungen) - idx)):
+                        if anweisungen[idx + offset][0] == 4:  # VERGLEICHEN_SPRINGEN
+                            # Code-Ausschnitt
+                            start_idx = idx
+                            end_idx = min(idx + offset + 1, len(anweisungen))
+                            ausschnitt = []
+                            for a in range(start_idx, end_idx):
+                                op = anweisungen[a][0]
+                                name = OPCODE_NAMEN[op] if op < len(OPCODE_NAMEN) else f"?({op})"
+                                ausschnitt.append({
+                                    "index": a,
+                                    "op": name,
+                                    "bytes": anweisungen[a]
+                                })
+                            muster_gefunden = {
+                                "lesen_extern_index": idx,
+                                "vergleichen_index": idx + offset,
+                                "abstand": offset,
+                                "code_ausschnitt": ausschnitt
+                            }
+                            break
+                    if muster_gefunden:
+                        break
+
+            if muster_gefunden:
+                organismen_mit_muster.append({
+                    "adresse": p.startadresse,
+                    "laenge": len(anweisungen) * 4,
+                    "muster": muster_gefunden
+                })
+
+        total_aktiv = sum(1 for p in pointer if p.aktiv)
+        mit_wahrnehmung = len(organismen_mit_muster)
+        prozent = round(mit_wahrnehmung / max(total_aktiv, 1) * 100, 1)
+
+        # Meilenstein-Log
+        meilensteine = self._pruefe_meilensteine(mit_wahrnehmung, organismen_mit_muster)
+
+        return {
+            "total_organismen": total_aktiv,
+            "mit_wahrnehmung": mit_wahrnehmung,
+            "prozent": prozent,
+            "top5": organismen_mit_muster[:5],
+            "meilensteine": meilensteine,
+        }
+
+    def _pruefe_meilensteine(self, mit_wahrnehmung, organismen_mit_muster):
+        """Lade, prüfe und speichere Meilensteine."""
+        datei = "meilensteine.json"
+        meilensteine = []
+        if os.path.exists(datei):
+            try:
+                with open(datei, "r") as f:
+                    meilensteine = json.load(f)
+            except (json.JSONDecodeError, IOError):
+                meilensteine = []
+
+        existierende_typen = {m["typ"] for m in meilensteine}
+
+        if "wahrnehmung_muster" not in existierende_typen and mit_wahrnehmung > 0:
+            erster = organismen_mit_muster[0]
+            meilensteine.append({
+                "typ": "wahrnehmung_muster",
+                "titel": "Erstes Wahrnehmungs-Muster entdeckt",
+                "beschreibung": (
+                    f"Organismus an Adresse {erster['adresse']} hat LESEN_EXTERN "
+                    f"gefolgt von VERGLEICHEN_SPRINGEN (Abstand: "
+                    f"{erster['muster']['abstand']} Anweisungen)"
+                ),
+                "timestamp": time.time(),
+                "adresse": erster["adresse"]
+            })
+            try:
+                with open(datei, "w") as f:
+                    json.dump(meilensteine, f, indent=2)
+            except IOError:
+                pass
+
+        return meilensteine

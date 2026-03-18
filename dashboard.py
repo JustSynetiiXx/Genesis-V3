@@ -225,6 +225,7 @@ canvas{width:100%;background:#111;border:1px solid #222;border-radius:4px}
  <button onclick="showTab('weltkarte')">WELTKARTE</button>
  <button onclick="showTab('population')">POPULATION</button>
  <button onclick="showTab('genome')">GENOME</button>
+ <button onclick="showTab('analyse')">ANALYSE</button>
  <button onclick="showTab('export')">EXPORT</button>
 </div>
 
@@ -263,7 +264,7 @@ canvas{width:100%;background:#111;border:1px solid #222;border-radius:4px}
    <span><span class="legend-dot" style="background:#0a0a0a;border:1px solid #333"></span> Leer</span>
    <span><span class="legend-dot" style="background:#0a4a2a"></span> Teilweise</span>
    <span><span class="legend-dot" style="background:#00ffcc"></span> Voll</span>
-   <span><span class="legend-dot" style="background:#ff6b6b"></span> Pointer</span>
+   <span><span class="legend-dot" style="background:#0a4a2a;border:2px solid #ffcc00"></span> Pointer (Rahmen)</span>
   </div>
   <div class="weltkarte-grid" id="weltkarte"></div>
  </div>
@@ -306,13 +307,32 @@ canvas{width:100%;background:#111;border:1px solid #222;border-radius:4px}
  </div>
 </div>
 
+<!-- ANALYSE -->
+<div class="panel" id="tab-analyse">
+ <div class="card">
+  <div class="big-number" id="a-count">—</div>
+  <div class="big-label" id="a-label">Organismen mit Wahrnehmungs-Muster</div>
+ </div>
+ <div class="card">
+  <h3>Top 5 — Wahrnehmungs-Muster</h3>
+  <div id="a-top5" style="color:#666">Lade...</div>
+ </div>
+ <div class="card">
+  <h3>Meilenstein-Log</h3>
+  <div id="a-meilensteine" style="color:#666">Keine Meilensteine</div>
+ </div>
+ <div style="margin-top:12px">
+  <button class="btn" onclick="downloadExport('/api/export_analyse','genesis_analyse.json')">Analyse Export (JSON)</button>
+ </div>
+</div>
+
 <!-- EXPORT -->
 <div class="panel" id="tab-export">
  <div class="card">
   <h3>Daten Export</h3>
   <p style="color:#888;margin-bottom:16px">Lade einen Snapshot aller aktuellen Daten herunter.</p>
-  <a class="btn" href="/api/export" target="_blank" download="genesis_snapshot.json">JSON Snapshot</a>
-  <button class="btn" onclick="exportSpeicher()">Speicher-Dump (Base64)</button>
+  <button class="btn" onclick="downloadExport('/api/export','genesis_snapshot.json')">JSON Snapshot</button>
+  <button class="btn" onclick="downloadExport('/api/export?speicher=1','genesis_speicher.json')">Speicher-Dump (Base64)</button>
  </div>
  <div class="card">
   <h3>API Endpoints</h3>
@@ -335,9 +355,10 @@ function showTab(name){
  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
  document.getElementById('tab-'+name).classList.add('active');
  document.querySelectorAll('.tabs button').forEach((b,i)=>{
-  b.classList.toggle('active',['home','weltkarte','population','genome','export'][i]===name);
+  b.classList.toggle('active',['home','weltkarte','population','genome','analyse','export'][i]===name);
  });
  if(name==='population')drawCharts();
+ if(name==='analyse')refreshAnalyse();
 }
 
 function fmt(n){
@@ -392,11 +413,11 @@ function updateWeltkarte(d){
  for(let i=0;i<1024;i++){
   let v=karte[i]||0;
   let c;
-  if(pointerBlocks.has(i)){c='#ff6b6b';}
-  else if(v===2){c='#00ffcc';}
+  if(v===2){c='#00ffcc';}
   else if(v===1){c='#0a4a2a';}
   else{c='#0a0a0a';}
   cells[i].style.background=c;
+  cells[i].style.boxShadow=pointerBlocks.has(i)?'inset 0 0 0 2px #ffcc00':'none';
  }
 }
 
@@ -495,8 +516,50 @@ function drawCharts(){
  drawLine(ctx4,c4.width,c4.height,data,'genom_laenge_avg','#00ffcc');
 }
 
-function exportSpeicher(){
- window.open('/api/export?speicher=1','_blank');
+function downloadExport(url,filename){
+ fetch(url).then(r=>r.blob()).then(blob=>{
+  let a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(a.href);
+ }).catch(e=>alert('Export fehlgeschlagen: '+e));
+}
+
+async function refreshAnalyse(){
+ try{
+  let r=await fetch('/api/analyse');
+  let d=await r.json();
+  document.getElementById('a-count').textContent=d.mit_wahrnehmung;
+  document.getElementById('a-label').textContent=d.mit_wahrnehmung+' von '+d.total_organismen+' Organismen ('+d.prozent+'%)';
+  let h='';
+  if(!d.top5||d.top5.length===0){h='<div style="color:#666">Noch keine Organismen mit Wahrnehmungs-Muster gefunden.</div>';}
+  else{d.top5.forEach((o,i)=>{
+   h+='<div class="genom-item">';
+   h+='<strong>#'+(i+1)+'</strong> Adresse '+o.adresse+' — '+o.laenge+' Bytes';
+   h+='<div style="font-size:11px;color:#888;margin:4px 0">LESEN_EXT bei Anweisung '+o.muster.lesen_extern_index+' → VERGL_SPR bei '+o.muster.vergleichen_index+' (Abstand: '+o.muster.abstand+')</div>';
+   o.muster.code_ausschnitt.forEach(c=>{
+    let col=c.op==='LESEN_EXT'?'#aa66ff':c.op==='VERGL_SPR'?'#ffaa44':'#888';
+    let bg=c.op==='LESEN_EXT'?'#1a0a2a':c.op==='VERGL_SPR'?'#2a1a0a':'transparent';
+    h+='<div style="font-family:monospace;font-size:12px;padding:2px 8px;margin:2px 0;border-radius:3px;color:'+col+';background:'+bg+'">'+c.index+': '+c.op+' ['+c.bytes.join(', ')+']</div>';
+   });
+   h+='</div>';
+  });}
+  document.getElementById('a-top5').innerHTML=h;
+  let mh='';
+  if(!d.meilensteine||d.meilensteine.length===0){mh='<div style="color:#666">Noch keine Meilensteine erreicht.</div>';}
+  else{d.meilensteine.forEach(m=>{
+   let zeit=new Date(m.timestamp*1000).toLocaleString('de-DE');
+   let bcolor=m.typ==='durchbruch_wahrnehmung'?'#ff6b6b':'#00ffcc';
+   mh+='<div style="background:#151515;border-left:3px solid '+bcolor+';padding:10px 14px;margin-bottom:8px;border-radius:0 6px 6px 0">';
+   mh+='<div style="color:#555;font-size:11px">'+zeit+'</div>';
+   mh+='<div style="color:'+bcolor+';font-weight:bold">'+m.titel+'</div>';
+   mh+='<div>'+m.beschreibung+'</div></div>';
+  });}
+  document.getElementById('a-meilensteine').innerHTML=mh;
+ }catch(e){}
 }
 
 async function refresh(){
@@ -512,6 +575,7 @@ async function refresh(){
   updateWeltkarte(d);
   updateGenome(d);
   if(currentTab==='population')drawCharts();
+  if(currentTab==='analyse')refreshAnalyse();
  }catch(e){
   document.getElementById('hdr-status').textContent='Verbindungsfehler';
  }
@@ -575,6 +639,34 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     bytes(welt.speicher)
                 ).decode("ascii")
             self._json_response(daten)
+
+        elif path == "/api/analyse":
+            try:
+                with sim_lock:
+                    pointer_kopie = list(pointer)
+                beobachter = Beobachter(welt, pointer_kopie, sim_daten)
+                ergebnis = beobachter.analyse_wahrnehmung()
+                self._json_response(ergebnis)
+            except Exception:
+                self._json_response({"total_organismen": 0, "mit_wahrnehmung": 0,
+                                     "prozent": 0, "top5": [], "meilensteine": []})
+
+        elif path == "/api/export_analyse":
+            try:
+                with sim_lock:
+                    pointer_kopie = list(pointer)
+                beobachter = Beobachter(welt, pointer_kopie, sim_daten)
+                ergebnis = beobachter.analyse_wahrnehmung()
+                body = json.dumps(ergebnis, indent=2, ensure_ascii=False).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/octet-stream")
+                self.send_header("Content-Disposition",
+                                 'attachment; filename="genesis_analyse.json"')
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            except Exception:
+                self._json_response({"error": "Analyse fehlgeschlagen"})
 
         elif path == "/api/history":
             self._json_response(list(historie))
