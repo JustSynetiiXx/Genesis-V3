@@ -94,6 +94,13 @@ class ExecutionPointer:
             anzahl = min(r[arg1 % 4], 1024)  # Max 1024 Bytes pro Kopie
             quelle = r[arg2 % 4]
             ziel_adr = r[arg3 % 4]
+            # Energie-Kosten: 1 Energie pro 4 kopierte Bytes, Minimum 1
+            kopier_kosten = max(anzahl // 4, 1)
+            # Bei zu wenig Energie: nur so viel kopieren wie Energie reicht
+            if kopier_kosten > self.energie:
+                anzahl = self.energie * 4
+                kopier_kosten = max(anzahl // 4, 1)
+            self.energie -= kopier_kosten
             for i in range(anzahl):
                 ziel_pos = (ziel_adr + i) % SPEICHER_GROESSE
                 # Materie-Exklusion: nur auf leere Bytes schreiben

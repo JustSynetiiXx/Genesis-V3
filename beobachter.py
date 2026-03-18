@@ -4,7 +4,10 @@ Read-Only Analyse des Speichers. Verändert NICHTS.
 Wie ein Mikroskop — beobachtet, aber beeinflusst nicht.
 """
 
+import json
 import math
+import os
+import time
 from collections import Counter
 
 from welt import SPEICHER_GROESSE
@@ -151,4 +154,77 @@ class Beobachter:
             "weltkarte": list(karte),
             "pointer_positionen": pointer_positionen,
             "tick_nummer": self.sim_daten.get("tick", 0),
+        }
+
+    def analyse_wahrnehmung(self):
+        """Scanne alle Genome nach Wahrnehmungs-Muster:
+        LESEN_EXTERN (6) gefolgt von VERGLEICHEN_SPRINGEN (4) innerhalb der nächsten 3 Anweisungen (12 Bytes).
+        """
+        pointer = self.pointer_liste
+        treffer = []
+
+        for p in pointer:
+            if not p.aktiv:
+                continue
+            genom = self._extrahiere_genom(p.startadresse)
+            hat_muster = False
+            code_ausschnitt = ""
+            for i in range(0, len(genom) - 4, 4):
+                if genom[i] == 6:  # LESEN_EXTERN
+                    # Suche VERGLEICHEN_SPRINGEN in den nächsten 3 Anweisungen
+                    for j in range(1, 4):
+                        pos = i + j * 4
+                        if pos < len(genom) and genom[pos] == 4:
+                            hat_muster = True
+                            start = i
+                            ende = min(pos + 4, len(genom))
+                            code_ausschnitt = " ".join(f"{b:02x}" for b in genom[start:ende])
+                            break
+                    if hat_muster:
+                        break
+            if hat_muster:
+                treffer.append({
+                    "adresse": p.startadresse,
+                    "code_ausschnitt": code_ausschnitt,
+                    "genom_laenge": len(genom),
+                })
+
+        gesamt = len([p for p in pointer if p.aktiv])
+        anzahl = len(treffer)
+        prozent = round(anzahl / max(gesamt, 1) * 100, 2)
+
+        # Meilenstein-Tracking
+        meilensteine = []
+        meilenstein_pfad = "meilensteine.json"
+        if os.path.exists(meilenstein_pfad):
+            try:
+                with open(meilenstein_pfad, "r") as f:
+                    meilensteine = json.load(f)
+            except Exception:
+                meilensteine = []
+
+        if anzahl > 0:
+            bereits_entdeckt = any(
+                m.get("typ") == "wahrnehmung_erstmals" for m in meilensteine
+            )
+            if not bereits_entdeckt:
+                meilensteine.append({
+                    "typ": "wahrnehmung_erstmals",
+                    "zeitstempel": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "tick": self.sim_daten.get("tick", 0),
+                    "anzahl": anzahl,
+                    "beschreibung": f"Erstmals Wahrnehmungs-Muster bei {anzahl} Organismus(en) entdeckt",
+                })
+                try:
+                    with open(meilenstein_pfad, "w") as f:
+                        json.dump(meilensteine, f, ensure_ascii=False, indent=2)
+                except Exception:
+                    pass
+
+        return {
+            "anzahl": anzahl,
+            "gesamt": gesamt,
+            "prozent": prozent,
+            "top5": treffer[:5],
+            "meilensteine": meilensteine,
         }
