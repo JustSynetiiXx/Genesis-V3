@@ -65,7 +65,8 @@ def simulation_thread():
         platz_frei = MAX_POINTER - len(pointer_liste)
 
         for p in pointer_liste:
-            p.tick(welt_obj)
+            energie_pro_org = 400000 // max(len(pointer_liste), 1)
+            p.tick(welt_obj, energie_pro_org)
 
             if not p.aktiv:
                 sim_daten["tode_gesamt"] += 1
@@ -99,14 +100,15 @@ def simulation_thread():
 
         # Verfall
         for _ in range(VERFALL_RATE):
-            welt_obj.schreiben(random.randint(0, SPEICHER_GROESSE - 1), 0)
+            welt_obj.schreiben((blitz_start + i) % SPEICHER_GROESSE, 0)
 
         # Katastrophen-Physik: Blitz
         if random.randint(1, 3000) == 1:
             pop_vor = len(pointer_liste)
             blitz_bytes = SPEICHER_GROESSE // 15
-            for _ in range(blitz_bytes):
-                welt_obj.schreiben(random.randint(0, SPEICHER_GROESSE - 1), 0)
+            blitz_start = random.randint(0, SPEICHER_GROESSE - 1)
+            for i in range(blitz_bytes):
+                welt_obj.schreiben((blitz_start + i) % SPEICHER_GROESSE, 0)
             global letzter_blitz
             letzter_blitz = {
                 "tick": tick,

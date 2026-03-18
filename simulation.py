@@ -175,13 +175,14 @@ def main():
 
             # === Verfall: Zufällige Bytes zerfallen zu 0 ===
             for _ in range(VERFALL_RATE):
-                welt.schreiben(random.randint(0, SPEICHER_GROESSE - 1), 0)
+                welt.schreiben((blitz_start + i) % SPEICHER_GROESSE, 0)
 
             # === Katastrophen-Physik: Blitz ===
             if random.randint(1, 3000) == 1:
                 blitz_bytes = SPEICHER_GROESSE // 15
-                for _ in range(blitz_bytes):
-                    welt.schreiben(random.randint(0, SPEICHER_GROESSE - 1), 0)
+                blitz_start = random.randint(0, SPEICHER_GROESSE - 1)
+            for i in range(blitz_bytes):
+                    welt.schreiben((blitz_start + i) % SPEICHER_GROESSE, 0)
                 print(f"BLITZ: ~{blitz_bytes:,} Bytes zerstört bei Tick {tick:,} "
                       f"({len(pointer)} Organismen)")
 

@@ -99,11 +99,11 @@ class ExecutionPointer:
             quelle = r[arg2 % 4]
             ziel_adr = r[arg3 % 4]
             # Energie-Kosten: 1 Energie pro 4 kopierte Bytes, Minimum 1
-            kopier_kosten = max(anzahl // 4, 1)
+            kopier_kosten = max(anzahl, 1)
             # Bei zu wenig Energie: nur so viel kopieren wie Energie reicht
             if kopier_kosten > self.energie:
                 anzahl = self.energie * 4
-                kopier_kosten = max(anzahl // 4, 1)
+                kopier_kosten = max(anzahl, 1)
             self.energie -= kopier_kosten
             for i in range(anzahl):
                 ziel_pos = (ziel_adr + i) % SPEICHER_GROESSE
@@ -150,9 +150,9 @@ class ExecutionPointer:
         self.adresse += ANWEISUNG_GROESSE
         return True
 
-    def tick(self, welt: Welt):
+    def tick(self, welt, energie=200):
         """200 Energie, dann ausführen bis leer oder tot."""
-        self.energie = 200
+        self.energie = energie
         self.sinnvolle_ops = 0
         # Zellgrenze scannen: finde ENDE ab Startadresse
         self._zellende = self.startadresse
