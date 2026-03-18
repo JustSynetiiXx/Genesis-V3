@@ -8,6 +8,7 @@ import json
 import time
 import threading
 import random
+import os
 import base64
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
@@ -35,6 +36,7 @@ sim_daten = {
 letztes_ergebnis = {}
 historie = []  # Letzte 900 Datenpunkte (30 min bei 2s)
 sim_laeuft = True
+letzter_blitz = None  # {"tick": ..., "zeitstempel": ..., "population_vor": ...}
 
 
 def simulation_thread():
@@ -98,6 +100,37 @@ def simulation_thread():
         # Verfall
         for _ in range(VERFALL_RATE):
             welt_obj.schreiben(random.randint(0, SPEICHER_GROESSE - 1), 0)
+
+        # Katastrophen-Physik: Blitz
+        if random.randint(1, 3000) == 1:
+            pop_vor = len(pointer_liste)
+            blitz_bytes = SPEICHER_GROESSE // 15
+            for _ in range(blitz_bytes):
+                welt_obj.schreiben(random.randint(0, SPEICHER_GROESSE - 1), 0)
+            global letzter_blitz
+            letzter_blitz = {
+                "tick": tick,
+                "zeitstempel": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "population_vor": pop_vor,
+            }
+            # Meilenstein loggen
+            try:
+                meilenstein_pfad = "meilensteine.json"
+                meilensteine = []
+                if os.path.exists(meilenstein_pfad):
+                    with open(meilenstein_pfad, "r") as f:
+                        meilensteine = json.load(f)
+                meilensteine.append({
+                    "typ": "blitz",
+                    "tick": tick,
+                    "zeitstempel": letzter_blitz["zeitstempel"],
+                    "population_vor": pop_vor,
+                    "beschreibung": f"Blitz bei Tick {tick}: {pop_vor} Organismen vor dem Einschlag. Verluste in folgenden Ticks sichtbar.",
+                })
+                with open(meilenstein_pfad, "w") as f:
+                    json.dump(meilensteine, f, ensure_ascii=False, indent=2)
+            except Exception:
+                pass
 
         sim_daten["tick"] = tick
 
@@ -207,6 +240,11 @@ canvas{width:100%;background:#111;border:1px solid #222;border-radius:4px}
 .btn:hover{background:#222;border-color:#00ffcc}
 .legend{display:flex;gap:16px;margin:8px 0;font-size:11px;color:#888;flex-wrap:wrap}
 .legend-dot{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:middle}
+.trace-table{width:100%;border-collapse:collapse;font-size:11px;margin-top:8px}
+.trace-table th{background:#1a1a1a;color:#888;padding:4px 6px;text-align:left;border-bottom:1px solid #333}
+.trace-table td{padding:4px 6px;border-bottom:1px solid #1a1a1a}
+.trace-lesen-ext{background:#2a1a3a}
+.trace-vergl-spr{background:#3a2a1a}
 @media(max-width:600px){
  .grid-2{grid-template-columns:1fr}
  .big-number{font-size:36px}
@@ -255,6 +293,7 @@ canvas{width:100%;background:#111;border:1px solid #222;border-radius:4px}
   <div class="stat-row"><span class="stat-label">Population Max</span><span class="stat-value" id="h-popmax">—</span></div>
   <div class="stat-row"><span class="stat-label">Genom Min</span><span class="stat-value" id="h-genommin">—</span></div>
   <div class="stat-row"><span class="stat-label">Genom Max</span><span class="stat-value" id="h-genommax">—</span></div>
+  <div class="stat-row" id="h-blitz-row" style="display:none"><span class="stat-label">Letzter Blitz</span><span class="stat-value" id="h-blitz" style="color:#ff6b6b">—</span></div>
  </div>
 </div>
 
@@ -319,6 +358,7 @@ canvas{width:100%;background:#111;border:1px solid #222;border-radius:4px}
   <h3>Top 5 Organismen mit Wahrnehmungs-Muster</h3>
   <div id="a-top5"><div style="color:#666">Keine Daten</div></div>
  </div>
+ <div id="a-traces"></div>
  <div class="card">
   <h3>Meilenstein-Log</h3>
   <div id="a-meilensteine"><div style="color:#666">Keine Meilensteine</div></div>
@@ -342,6 +382,7 @@ canvas{width:100%;background:#111;border:1px solid #222;border-radius:4px}
   <div class="stat-row"><span class="stat-label">Historie</span><span class="stat-value">GET /api/history</span></div>
   <div class="stat-row"><span class="stat-label">Analyse</span><span class="stat-value">GET /api/analyse</span></div>
   <div class="stat-row"><span class="stat-label">Analyse Export</span><span class="stat-value">GET /api/export_analyse</span></div>
+  <div class="stat-row"><span class="stat-label">Trace</span><span class="stat-value">GET /api/trace</span></div>
  </div>
 </div>
 </div>
@@ -351,6 +392,7 @@ let currentTab='home';
 let historyData=[];
 let pointerBlocks=new Set();
 
+let traceLoaded=false;
 function showTab(name){
  currentTab=name;
  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
@@ -359,6 +401,36 @@ function showTab(name){
   b.classList.toggle('active',['home','weltkarte','population','genome','analyse','export'][i]===name);
  });
  if(name==='population')drawCharts();
+ if(name==='analyse'){traceLoaded=false;loadTrace();}
+}
+async function loadTrace(){
+ if(traceLoaded)return;
+ try{
+  let res=await fetch('/api/trace');
+  let d=await res.json();
+  traceLoaded=true;
+  renderTraces(d.traces||[]);
+ }catch(e){}
+}
+function renderTraces(traces){
+ let el=document.getElementById('a-traces');
+ if(!traces.length){el.innerHTML='';return;}
+ let html='';
+ traces.forEach(t=>{
+  html+='<div class="card"><h3>Trace Organismus @'+t.adresse+' ('+t.genom_laenge+' Bytes)</h3>';
+  html+='<div style="overflow-x:auto"><table class="trace-table"><tr><th>#</th><th>Operation</th><th>R0</th><th>R1</th><th>R2</th><th>R3</th><th>Details</th></tr>';
+  t.schritte.forEach(s=>{
+   let cls='';
+   if(s.ist_lesen_extern)cls=' class="trace-lesen-ext"';
+   else if(s.ist_vergleichen_springen)cls=' class="trace-vergl-spr"';
+   html+='<tr'+cls+'><td>'+s.schritt+'</td><td>'+s.operation+'</td>';
+   html+='<td>'+s.register_nachher[0]+'</td><td>'+s.register_nachher[1]+'</td>';
+   html+='<td>'+s.register_nachher[2]+'</td><td>'+s.register_nachher[3]+'</td>';
+   html+='<td>'+s.details+'</td></tr>';
+  });
+  html+='</table></div></div>';
+ });
+ el.innerHTML=html;
 }
 
 function fmt(n){
@@ -394,6 +466,10 @@ function updateHome(d){
  document.getElementById('h-genommin').textContent=fmt(d.genom_laenge_min);
  document.getElementById('h-genommax').textContent=fmt(d.genom_laenge_max);
  document.getElementById('hdr-status').textContent='Tick '+fmt(d.tick_nummer)+' | '+fmt(d.population)+' Org.';
+ if(d.letzter_blitz){
+  document.getElementById('h-blitz-row').style.display='';
+  document.getElementById('h-blitz').textContent='Tick '+fmt(d.letzter_blitz.tick)+' ('+d.letzter_blitz.population_vor+' Org. vorher)';
+ }
 }
 
 function updateWeltkarte(d){
@@ -630,7 +706,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._html_response(DASHBOARD_HTML)
 
         elif path == "/api/status":
-            self._json_response(letztes_ergebnis or {})
+            daten = dict(letztes_ergebnis) if letztes_ergebnis else {}
+            if letzter_blitz:
+                daten["letzter_blitz"] = letzter_blitz
+            self._json_response(daten)
 
         elif path == "/api/weltkarte":
             karte = letztes_ergebnis.get("weltkarte", [])
@@ -668,6 +747,19 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     self._json_response({"anzahl": 0, "gesamt": 0, "prozent": 0, "top5": [], "meilensteine": []})
             except Exception as e:
                 self._json_response({"error": str(e)})
+
+        elif path == "/api/trace":
+            try:
+                with sim_lock:
+                    pointer_kopie = list(pointer)
+                if welt is not None:
+                    beobachter = Beobachter(welt, pointer_kopie, sim_daten)
+                    ergebnis = beobachter.trace_organismen()
+                    self._json_response(ergebnis)
+                else:
+                    self._json_response({"traces": []})
+            except Exception as e:
+                self._json_response({"error": str(e), "traces": []})
 
         elif path == "/api/export_analyse":
             try:

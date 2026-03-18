@@ -177,6 +177,14 @@ def main():
             for _ in range(VERFALL_RATE):
                 welt.schreiben(random.randint(0, SPEICHER_GROESSE - 1), 0)
 
+            # === Katastrophen-Physik: Blitz ===
+            if random.randint(1, 3000) == 1:
+                blitz_bytes = SPEICHER_GROESSE // 15
+                for _ in range(blitz_bytes):
+                    welt.schreiben(random.randint(0, SPEICHER_GROESSE - 1), 0)
+                print(f"BLITZ: ~{blitz_bytes:,} Bytes zerstört bei Tick {tick:,} "
+                      f"({len(pointer)} Organismen)")
+
             # === Periodisches Logging ===
             jetzt = time.time()
             if jetzt - letzter_log >= LOG_INTERVALL:

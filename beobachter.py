@@ -232,4 +232,140 @@ class Beobachter:
             "prozent": prozent,
             "top5": treffer[:5],
             "meilensteine": meilensteine,
+            "trace_verfuegbar": anzahl > 0,
         }
+
+    def _trace_schritt(self, speicher, adresse, register, zellende):
+        """Ein Schritt READ-ONLY simulieren. Gibt (neues_register, neue_adresse, details, aktiv) zurück."""
+        adr = adresse % SPEICHER_GROESSE
+        befehl = speicher[adr]
+        arg1 = speicher[(adr + 1) % SPEICHER_GROESSE]
+        arg2 = speicher[(adr + 2) % SPEICHER_GROESSE]
+        arg3 = speicher[(adr + 3) % SPEICHER_GROESSE]
+        r = list(register)
+        details = ""
+        aktiv = True
+        neue_adresse = adresse + 4
+
+        if befehl == 0:  # NOOP
+            details = "Nichts"
+        elif befehl == 1:  # LESEN
+            quell_adr = r[arg1 % 4] % SPEICHER_GROESSE
+            wert = speicher[quell_adr]
+            r[arg3 % 4] = wert
+            details = f"Gelesen: {wert} von Adresse {quell_adr}"
+        elif befehl == 2:  # SCHREIBEN
+            ziel_adr = r[arg3 % 4] % SPEICHER_GROESSE
+            wert = r[arg1 % 4] & 0xFF
+            details = f"Wuerde schreiben: {wert} an Adresse {ziel_adr}"
+        elif befehl == 3:  # ADDIEREN
+            ergebnis = r[arg1 % 4] + r[arg2 % 4]
+            r[arg3 % 4] = ergebnis
+            details = f"{r[arg1 % 4]}+{r[arg2 % 4]}={ergebnis}"
+        elif befehl == 4:  # VERGLEICHEN_SPRINGEN
+            va = r[arg1 % 4]
+            vb = r[arg2 % 4]
+            if va != vb:
+                sprung = arg3 if arg3 < 128 else arg3 - 256
+                neue_adresse = adresse + sprung * 4
+                details = f"Sprung genommen: ja, {sprung:+d} Anweisungen (R{arg1%4}={va} != R{arg2%4}={vb})"
+            else:
+                details = f"Sprung genommen: nein (R{arg1%4}={va} == R{arg2%4}={vb})"
+        elif befehl == 5:  # KOPIEREN
+            anzahl = min(r[arg1 % 4], 1024)
+            quell = r[arg2 % 4]
+            ziel = r[arg3 % 4]
+            details = f"Wuerde kopieren: {anzahl} Bytes von {quell} nach {ziel}"
+        elif befehl == 6:  # LESEN_EXTERN
+            extern_adr = (zellende + r[arg1 % 4]) % SPEICHER_GROESSE
+            wert = speicher[extern_adr]
+            r[arg3 % 4] = wert
+            details = f"Extern gelesen: {wert} von Adresse {extern_adr}"
+        elif befehl == 7:  # SELBST
+            details = f"Startadresse"
+        elif befehl == 8:  # SETZEN
+            r[arg3 % 4] = arg1
+            details = f"R{arg3%4} = {arg1}"
+        elif befehl == 9:  # ENDE
+            aktiv = False
+            details = "ENDE erreicht"
+        elif befehl == 10:  # SCHREIBEN_EXTERN
+            extern_adr = (zellende + r[arg3 % 4]) % SPEICHER_GROESSE
+            wert = r[arg1 % 4] & 0xFF
+            details = f"Wuerde extern schreiben: {wert} an Adresse {extern_adr}"
+        else:
+            details = f"Unbekannter Opcode {befehl}"
+
+        op_name = OPCODE_NAMEN[befehl] if befehl < len(OPCODE_NAMEN) else f"?({befehl})"
+
+        return r, neue_adresse, details, aktiv, op_name, befehl
+
+    def trace_organismen(self):
+        """Trace bis zu 3 Organismen mit Wahrnehmungs-Muster. READ-ONLY."""
+        pointer = self.pointer_liste
+        speicher = self.welt.speicher
+        traces = []
+
+        # Finde Organismen mit dem Muster
+        kandidaten = []
+        for p in pointer:
+            if not p.aktiv:
+                continue
+            genom = self._extrahiere_genom(p.startadresse)
+            for i in range(0, len(genom) - 4, 4):
+                if genom[i] == 6:  # LESEN_EXTERN
+                    for j in range(1, 4):
+                        pos = i + j * 4
+                        if pos < len(genom) and genom[pos] in (4, 10):
+                            kandidaten.append(p)
+                            break
+                    else:
+                        continue
+                    break
+            if len(kandidaten) >= 3:
+                break
+
+        for p in kandidaten:
+            genom = self._extrahiere_genom(p.startadresse)
+            # Zellende berechnen (wie im Interpreter)
+            zellende = p.startadresse
+            for i in range(0, 1024, 4):
+                pos = (p.startadresse + i) % SPEICHER_GROESSE
+                if speicher[pos] == 9:  # ENDE
+                    zellende = (p.startadresse + i + 4) % SPEICHER_GROESSE
+                    break
+            else:
+                zellende = (p.startadresse + 1024) % SPEICHER_GROESSE
+
+            # Kopiere Register und Adresse
+            reg = list(p.register)
+            adr = p.adresse
+            schritte = []
+
+            for schritt_nr in range(1, 51):
+                reg_vorher = list(reg)
+                reg, adr_neu, details, aktiv, op_name, opcode = self._trace_schritt(
+                    speicher, adr, reg, zellende
+                )
+                schritte.append({
+                    "schritt": schritt_nr,
+                    "operation": op_name,
+                    "opcode": opcode,
+                    "adresse": adr % SPEICHER_GROESSE,
+                    "register_vorher": reg_vorher,
+                    "register_nachher": list(reg),
+                    "details": details,
+                    "ist_lesen_extern": opcode == 6,
+                    "ist_vergleichen_springen": opcode == 4,
+                })
+                if not aktiv:
+                    break
+                adr = adr_neu
+
+            traces.append({
+                "adresse": p.startadresse,
+                "genom_laenge": len(genom),
+                "schritte": schritte,
+            })
+
+        return {"traces": traces}
