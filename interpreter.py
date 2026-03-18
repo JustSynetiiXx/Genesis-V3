@@ -4,7 +4,7 @@ Der dumme Ausführer. Liest, führt aus, geht weiter. Versteht nichts.
 
 Anweisungsformat: [BEFEHL, ARG1, ARG2, ARG3] — 4 Bytes pro Anweisung.
 
-10 Operationen:
+11 Operationen:
   0 NOOP:                 Tue nichts
   1 LESEN:                Speicher[Register[ARG1]] → Register[ARG3]
   2 SCHREIBEN:            Register[ARG1] → Speicher[Register[ARG3]]
@@ -14,10 +14,13 @@ Anweisungsformat: [BEFEHL, ARG1, ARG2, ARG3] — 4 Bytes pro Anweisung.
   5 KOPIEREN:             Kopiere Register[ARG1] Bytes von Speicher[Register[ARG2]]
                           nach Speicher[Register[ARG3]].
                           Spawnt neuen Execution Pointer wenn >= 20 Bytes kopiert.
-  6 LESEN_EXTERN:         Wie LESEN (in v3.0 identisch, Unterscheidung kommt später)
+  6 LESEN_EXTERN:         Speicher[Zellende + Register[ARG1]] → Register[ARG3]
+                          Liest AUSSERHALB der eigenen Zelle (ab ENDE-Markierung).
   7 SELBST:               Eigene Startadresse → Register[ARG3] (Propriozeption)
   8 SETZEN:               ARG1 (Literal) → Register[ARG3]
   9 ENDE:                 Stoppt Ausführung
+ 10 SCHREIBEN_EXTERN:     Register[ARG1] → Speicher[Zellende + Register[ARG3]]
+                          Schreibt AUSSERHALB der eigenen Zelle. Ignoriert Materie-Exklusion.
 """
 
 import random
@@ -36,6 +39,7 @@ LESEN_EXTERN = 6
 SELBST = 7
 SETZEN = 8
 ENDE = 9
+SCHREIBEN_EXTERN = 10
 
 ANWEISUNG_GROESSE = 4
 
@@ -120,7 +124,8 @@ class ExecutionPointer:
             self.sinnvolle_ops += 1
 
         elif befehl == LESEN_EXTERN:
-            r[arg3 % 4] = welt.lesen(r[arg1 % 4] % SPEICHER_GROESSE)
+            extern_adr = (self._zellende + r[arg1 % 4]) % SPEICHER_GROESSE
+            r[arg3 % 4] = welt.lesen(extern_adr)
             self.sinnvolle_ops += 1
 
         elif befehl == SELBST:
@@ -135,15 +140,29 @@ class ExecutionPointer:
             self.aktiv = False
             return False
 
-        # Ungültiger Opcode (> 9): tue nichts, verbrauche Energie
+        elif befehl == 10:  # SCHREIBEN_EXTERN
+            extern_adr = (self._zellende + r[arg3 % 4]) % SPEICHER_GROESSE
+            welt.schreiben(extern_adr, r[arg1 % 4] & 0xFF)  # KEINE Materie-Exklusion
+            self.sinnvolle_ops += 1
+
+        # Ungültiger Opcode (> 10): tue nichts, verbrauche Energie
 
         self.adresse += ANWEISUNG_GROESSE
         return True
 
     def tick(self, welt: Welt):
-        """100 Energie, dann ausführen bis leer oder tot."""
-        self.energie = 100
+        """200 Energie, dann ausführen bis leer oder tot."""
+        self.energie = 200
         self.sinnvolle_ops = 0
+        # Zellgrenze scannen: finde ENDE ab Startadresse
+        self._zellende = self.startadresse
+        for i in range(0, 1024, 4):
+            pos = (self.startadresse + i) % SPEICHER_GROESSE
+            if welt.lesen(pos) == ENDE:
+                self._zellende = (self.startadresse + i + 4) % SPEICHER_GROESSE
+                break
+        else:
+            self._zellende = (self.startadresse + 1024) % SPEICHER_GROESSE
         while self.schritt(welt):
             # Bounds-Check: Kein Wraparound erlaubt
             if self.adresse < 0 or self.adresse >= SPEICHER_GROESSE:

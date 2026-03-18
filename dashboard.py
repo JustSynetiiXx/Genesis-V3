@@ -144,6 +144,7 @@ def analyse_thread():
                 "genom_laenge_avg": ergebnis["genom_laenge_avg"],
                 "speicher_prozent": ergebnis["speicher_belegt_prozent"],
                 "lesen_extern": ergebnis["lesen_extern_anteil"],
+                "schreiben_extern": ergebnis.get("schreiben_extern_anteil", 0),
             })
 
             # Max 360 Einträge behalten
@@ -244,6 +245,7 @@ canvas{width:100%;background:#111;border:1px solid #222;border-radius:4px}
   <div class="mini-card"><div class="val" id="h-speicher">—</div><div class="lbl">Speicher %</div></div>
   <div class="mini-card"><div class="val" id="h-genomlen">—</div><div class="lbl">Genom Avg</div></div>
   <div class="mini-card"><div class="val" id="h-lesen-ext">—</div><div class="lbl">LESEN_EXT %</div></div>
+  <div class="mini-card"><div class="val" id="h-schreiben-ext">—</div><div class="lbl">SCHR_EXT %</div></div>
   <div class="mini-card"><div class="val" id="h-ticks">—</div><div class="lbl">Ticks</div></div>
   <div class="mini-card"><div class="val" id="h-tickrate">—</div><div class="lbl">Ticks/s</div></div>
  </div>
@@ -384,6 +386,7 @@ function updateHome(d){
  document.getElementById('h-speicher').textContent=d.speicher_belegt_prozent!==undefined?d.speicher_belegt_prozent.toFixed(1):'—';
  document.getElementById('h-genomlen').textContent=d.genom_laenge_avg!==undefined?d.genom_laenge_avg.toFixed(0):'—';
  document.getElementById('h-lesen-ext').textContent=d.lesen_extern_anteil!==undefined?d.lesen_extern_anteil.toFixed(2):'—';
+ document.getElementById('h-schreiben-ext').textContent=d.schreiben_extern_anteil!==undefined?d.schreiben_extern_anteil.toFixed(2):'—';
  document.getElementById('h-ticks').textContent=fmt(d.tick_nummer);
  document.getElementById('h-tickrate').textContent=fmt(d.ticks_pro_sekunde);
  document.getElementById('h-laufzeit').textContent=fmtTime(d.laufzeit_sekunden);
@@ -435,11 +438,11 @@ function updateGenome(d){
  let ops=d.operations_verteilung||{};
  let maxOp=Math.max(1,...Object.values(ops));
  let barsHtml='';
- let namen=["NOOP","LESEN","SCHREIBEN","ADDIEREN","VERGL_SPR","KOPIEREN","LESEN_EXT","SELBST","SETZEN","ENDE"];
+ let namen=["NOOP","LESEN","SCHREIBEN","ADDIEREN","VERGL_SPR","KOPIEREN","LESEN_EXT","SELBST","SETZEN","ENDE","SCHR_EXT"];
  namen.forEach(name=>{
   let val=ops[name]||0;
   let pct=(val/maxOp*100).toFixed(0);
-  let color=name==='LESEN_EXT'?'#ff6b6b':'#00ffcc';
+  let color=(name==='LESEN_EXT'||name==='SCHR_EXT')?'#ff6b6b':'#00ffcc';
   barsHtml+='<div class="bar-container">';
   barsHtml+='<span class="bar-label">'+name+'</span>';
   barsHtml+='<div class="bar-track"><div class="bar-fill" style="width:'+pct+'%;background:'+color+'"></div></div>';

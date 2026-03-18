@@ -14,7 +14,7 @@ from welt import SPEICHER_GROESSE
 
 OPCODE_NAMEN = [
     "NOOP", "LESEN", "SCHREIBEN", "ADDIEREN",
-    "VERGL_SPR", "KOPIEREN", "LESEN_EXT", "SELBST", "SETZEN", "ENDE"
+    "VERGL_SPR", "KOPIEREN", "LESEN_EXT", "SELBST", "SETZEN", "ENDE", "SCHR_EXT"
 ]
 
 
@@ -75,13 +75,13 @@ class Beobachter:
         return karte
 
     def _operations_verteilung(self, genome_liste):
-        """Zählt Opcodes 0-9 über alle Genome."""
-        verteilung = [0] * 10
+        """Zählt Opcodes 0-10 über alle Genome."""
+        verteilung = [0] * 11
         gesamt = 0
         for genom in genome_liste:
             for i in range(0, len(genom), 4):
                 opcode = genom[i]
-                if opcode < 10:
+                if opcode < 11:
                     verteilung[opcode] += 1
                 gesamt += 1
         return verteilung, gesamt
@@ -121,6 +121,10 @@ class Beobachter:
         lesen_extern_anteil = round(
             lesen_extern_count / max(ops_gesamt, 1) * 100, 2
         )
+        schreiben_extern_count = ops_verteilung[10] if len(ops_verteilung) > 10 else 0
+        schreiben_extern_anteil = round(
+            schreiben_extern_count / max(ops_gesamt, 1) * 100, 2
+        )
 
         # --- Speicher-Belegung ---
         null_bytes = speicher.count(0)
@@ -148,9 +152,10 @@ class Beobachter:
             "top_genome": top_genome,
             "operations_verteilung": {
                 OPCODE_NAMEN[i]: ops_verteilung[i]
-                for i in range(10)
+                for i in range(11)
             },
             "lesen_extern_anteil": lesen_extern_anteil,
+            "schreiben_extern_anteil": schreiben_extern_anteil,
             "weltkarte": list(karte),
             "pointer_positionen": pointer_positionen,
             "tick_nummer": self.sim_daten.get("tick", 0),
@@ -171,10 +176,10 @@ class Beobachter:
             code_ausschnitt = ""
             for i in range(0, len(genom) - 4, 4):
                 if genom[i] == 6:  # LESEN_EXTERN
-                    # Suche VERGLEICHEN_SPRINGEN in den nächsten 3 Anweisungen
+                    # Suche VERGLEICHEN_SPRINGEN oder SCHREIBEN_EXTERN in den nächsten 3 Anweisungen
                     for j in range(1, 4):
                         pos = i + j * 4
-                        if pos < len(genom) and genom[pos] == 4:
+                        if pos < len(genom) and genom[pos] in (4, 10):  # VERGL_SPR oder SCHR_EXT
                             hat_muster = True
                             start = i
                             ende = min(pos + 4, len(genom))
