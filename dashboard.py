@@ -72,6 +72,17 @@ def simulation_thread():
         for p in pointer_liste:
             p.tick(welt_obj)
 
+            for adr in p.neue_pointer:
+                if adr in belegte_adressen:
+                    continue
+                if platz_frei - len(neue_pointer) <= 0:
+                    break
+                neuer = ExecutionPointer(adr)
+                neue_pointer.append(neuer)
+                belegte_adressen.add(adr)
+                sim_daten["geburten_gesamt"] += 1
+            p.neue_pointer.clear()
+
             if not p.aktiv:
                 sim_daten["tode_gesamt"] += 1
                 belegte_adressen.discard(p.startadresse)
@@ -87,17 +98,6 @@ def simulation_thread():
                 p.kopier_events = 0
 
             p.mutationen.clear()
-
-            for adr in p.neue_pointer:
-                if adr in belegte_adressen:
-                    continue
-                if platz_frei - len(neue_pointer) <= 0:
-                    break
-                neuer = ExecutionPointer(adr)
-                neue_pointer.append(neuer)
-                belegte_adressen.add(adr)
-                sim_daten["geburten_gesamt"] += 1
-            p.neue_pointer.clear()
 
         pointer_liste = [p for p in pointer_liste if p.aktiv]
         pointer_liste.extend(neue_pointer)
