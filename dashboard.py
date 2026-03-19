@@ -103,7 +103,7 @@ def simulation_thread():
             welt_obj.schreiben(random.randint(0, SPEICHER_GROESSE - 1), 0)
 
         # Katastrophen-Physik: Blitz
-        if random.randint(1, 3000) == 1:
+        if len(pointer_liste) > 100 and random.randint(1, 3000) == 1:
             pop_vor = len(pointer_liste)
             blitz_bytes = SPEICHER_GROESSE // 15
             blitz_start = random.randint(0, SPEICHER_GROESSE - 1)
