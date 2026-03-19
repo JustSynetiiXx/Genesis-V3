@@ -43,6 +43,10 @@ SCHREIBEN_EXTERN = 10
 
 ANWEISUNG_GROESSE = 4
 
+# Globaler Zähler: Welche Opcodes werden tatsächlich ausgeführt?
+# Wird pro Tick von allen Organismen gemeinsam befüllt.
+ausgefuehrte_ops = [0] * 11
+
 
 class ExecutionPointer:
     def __init__(self, startadresse: int):
@@ -69,6 +73,9 @@ class ExecutionPointer:
         arg1 = welt.lesen(adr + 1)
         arg2 = welt.lesen(adr + 2)
         arg3 = welt.lesen(adr + 3)
+
+        if befehl < 11:
+            ausgefuehrte_ops[befehl] += 1
 
         r = self.register
 

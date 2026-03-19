@@ -13,7 +13,7 @@ import base64
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 from welt import Welt, SPEICHER_GROESSE
-from interpreter import ExecutionPointer, ENDE
+from interpreter import ExecutionPointer, ENDE, ausgefuehrte_ops
 from ur_replikator import erzeuge_ur_replikator
 from beobachter import Beobachter
 
@@ -170,6 +170,23 @@ def analyse_thread():
                 ergebnis["tick_nummer"] / max(laufzeit, 0.001), 0
             )
 
+            # Ausgeführte Ops auslesen und zurücksetzen
+            from beobachter import OPCODE_NAMEN
+            ops_snapshot = list(ausgefuehrte_ops)
+            for i in range(11):
+                ausgefuehrte_ops[i] = 0
+            ergebnis["ausgefuehrte_ops"] = {
+                OPCODE_NAMEN[i]: ops_snapshot[i] for i in range(11)
+            }
+            ausgefuehrte_total = sum(ops_snapshot)
+            ergebnis["ausgefuehrte_ops_total"] = ausgefuehrte_total
+            if ausgefuehrte_total > 0:
+                ergebnis["ausgefuehrte_lesen_ext_prozent"] = round(ops_snapshot[6] / ausgefuehrte_total * 100, 2)
+                ergebnis["ausgefuehrte_schr_ext_prozent"] = round(ops_snapshot[10] / ausgefuehrte_total * 100, 2)
+            else:
+                ergebnis["ausgefuehrte_lesen_ext_prozent"] = 0
+                ergebnis["ausgefuehrte_schr_ext_prozent"] = 0
+
             letztes_ergebnis = ergebnis
 
             # Historie speichern (kompakt)
@@ -186,6 +203,8 @@ def analyse_thread():
                 "lesen_extern": ergebnis["lesen_extern_anteil"],
                 "schreiben_extern": ergebnis.get("schreiben_extern_anteil", 0),
                 "nahrung": ergebnis.get("nahrung_anzahl", 0),
+                "lesen_ext_exec": ergebnis.get("ausgefuehrte_lesen_ext_prozent", 0),
+                "schr_ext_exec": ergebnis.get("ausgefuehrte_schr_ext_prozent", 0),
             })
 
             # Max 360 Einträge behalten
@@ -290,8 +309,8 @@ canvas{width:100%;background:#111;border:1px solid #222;border-radius:4px}
   <div class="mini-card"><div class="val" id="h-shannon">—</div><div class="lbl">Shannon</div></div>
   <div class="mini-card"><div class="val" id="h-speicher">—</div><div class="lbl">Speicher %</div></div>
   <div class="mini-card"><div class="val" id="h-genomlen">—</div><div class="lbl">Genom Avg</div></div>
-  <div class="mini-card"><div class="val" id="h-lesen-ext">—</div><div class="lbl">LESEN_EXT %</div></div>
-  <div class="mini-card"><div class="val" id="h-schreiben-ext">—</div><div class="lbl">SCHR_EXT %</div></div>
+  <div class="mini-card"><div class="val" id="h-lesen-ext">—</div><div class="lbl">LESEN_EXT % (exec)</div></div>
+  <div class="mini-card"><div class="val" id="h-schreiben-ext">—</div><div class="lbl">SCHR_EXT % (exec)</div></div>
   <div class="mini-card"><div class="val" id="h-nahrung">—</div><div class="lbl">NAHRUNG</div></div>
   <div class="mini-card"><div class="val" id="h-ticks">—</div><div class="lbl">Ticks</div></div>
   <div class="mini-card"><div class="val" id="h-tickrate">—</div><div class="lbl">Ticks/s</div></div>
@@ -346,6 +365,10 @@ canvas{width:100%;background:#111;border:1px solid #222;border-radius:4px}
   <h3>LESEN_EXTERN Anteil</h3>
   <div class="big-number" id="g-lesen-ext">—</div>
   <div class="big-label">Prozent aller Opcodes — Zeigt ob Wahrnehmung entsteht</div>
+ </div>
+ <div class="card">
+  <h3>Tatsächlich ausgeführte Operationen</h3>
+  <div id="exec-ops-bars"></div>
  </div>
  <div class="card">
   <h3>Operations-Verteilung</h3>
@@ -466,8 +489,8 @@ function updateHome(d){
  document.getElementById('h-shannon').textContent=d.diversitaet_shannon!==undefined?d.diversitaet_shannon.toFixed(2):'—';
  document.getElementById('h-speicher').textContent=d.speicher_belegt_prozent!==undefined?d.speicher_belegt_prozent.toFixed(1):'—';
  document.getElementById('h-genomlen').textContent=d.genom_laenge_avg!==undefined?d.genom_laenge_avg.toFixed(0):'—';
- document.getElementById('h-lesen-ext').textContent=d.lesen_extern_anteil!==undefined?d.lesen_extern_anteil.toFixed(2):'—';
- document.getElementById('h-schreiben-ext').textContent=d.schreiben_extern_anteil!==undefined?d.schreiben_extern_anteil.toFixed(2):'—';
+ document.getElementById('h-lesen-ext').textContent=d.ausgefuehrte_lesen_ext_prozent!==undefined?d.ausgefuehrte_lesen_ext_prozent.toFixed(2):'—';
+ document.getElementById('h-schreiben-ext').textContent=d.ausgefuehrte_schr_ext_prozent!==undefined?d.ausgefuehrte_schr_ext_prozent.toFixed(2):'—';
  document.getElementById('h-nahrung').textContent=d.nahrung_anzahl!==undefined?fmt(d.nahrung_anzahl):'—';
  document.getElementById('h-ticks').textContent=fmt(d.tick_nummer);
  document.getElementById('h-tickrate').textContent=fmt(d.ticks_pro_sekunde);
@@ -519,6 +542,22 @@ function updateGenome(d){
  // LESEN_EXTERN
  let el=document.getElementById('g-lesen-ext');
  el.textContent=d.lesen_extern_anteil!==undefined?d.lesen_extern_anteil.toFixed(2)+'%':'—';
+
+ // Ausgeführte Ops
+ let execOps=d.ausgefuehrte_ops||{};
+ let maxExecOp=Math.max(1,...Object.values(execOps));
+ let execBarsHtml='';
+ namen.forEach(name=>{
+  let val=execOps[name]||0;
+  let pct=(val/maxExecOp*100).toFixed(0);
+  let color=(name==='LESEN_EXT'||name==='SCHR_EXT')?'#ff6b6b':'#00ffcc';
+  execBarsHtml+='<div class="bar-container">';
+  execBarsHtml+='<span class="bar-label">'+name+'</span>';
+  execBarsHtml+='<div class="bar-track"><div class="bar-fill" style="width:'+pct+'%;background:'+color+'"></div></div>';
+  execBarsHtml+='<span class="bar-value">'+fmt(val)+'</span>';
+  execBarsHtml+='</div>';
+ });
+ document.getElementById('exec-ops-bars').innerHTML=execBarsHtml;
 
  // Operations-Verteilung
  let ops=d.operations_verteilung||{};
