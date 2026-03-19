@@ -90,9 +90,6 @@ class ExecutionPointer:
         elif befehl == LESEN:
             quell_adr = r[arg1 % 4] % SPEICHER_GROESSE
             r[arg3 % 4] = welt.lesen(quell_adr)
-            if r[arg3 % 4] == 42:
-                self.energie += 20
-                welt.schreiben(quell_adr, 0)
             self.sinnvolle_ops += 1
 
         elif befehl == SCHREIBEN:
