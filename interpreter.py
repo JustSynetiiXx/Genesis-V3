@@ -102,7 +102,7 @@ class ExecutionPointer:
             kopier_kosten = max(anzahl, 1)
             # Bei zu wenig Energie: nur so viel kopieren wie Energie reicht
             if kopier_kosten > self.energie:
-                anzahl = self.energie * 4
+                anzahl = self.energie
                 kopier_kosten = max(anzahl, 1)
             self.energie -= kopier_kosten
             for i in range(anzahl):
