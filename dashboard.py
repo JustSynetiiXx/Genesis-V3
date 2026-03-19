@@ -48,6 +48,11 @@ def simulation_thread():
     for i, byte in enumerate(code):
         welt_obj.schreiben(i, byte)
 
+    # Nahrung vorfuellen (~20% des Speichers)
+    for _ in range(SPEICHER_GROESSE // 5):
+        pos = random.randint(0, SPEICHER_GROESSE - 1)
+        if welt_obj.lesen(pos) == 0:
+            welt_obj.schreiben(pos, 42)
     pointer_liste = [ExecutionPointer(0)]
     belegte_adressen = {0}
 
