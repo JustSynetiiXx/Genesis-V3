@@ -112,8 +112,18 @@ def simulation_thread():
             if welt_obj.lesen(pos) == 0:
                 welt_obj.schreiben(pos, 42)
 
+        # Abiogenese: Wenn alles tot, neues Leben
+        if len(pointer_liste) == 0:
+            code = erzeuge_ur_replikator()
+            start = random.randint(0, SPEICHER_GROESSE - len(code))
+            for i, byte in enumerate(code):
+                welt_obj.schreiben(start + i, byte)
+            pointer_liste.append(ExecutionPointer(start))
+            belegte_adressen.clear()
+            belegte_adressen.add(start)
+
         # Katastrophen-Physik: Blitz
-        if len(pointer_liste) > 100 and random.randint(1, 3000) == 1:
+        if False:  # Blitze deaktiviert bis stabil
             pop_vor = len(pointer_liste)
             blitz_bytes = SPEICHER_GROESSE // 15
             blitz_start = random.randint(0, SPEICHER_GROESSE - 1)
