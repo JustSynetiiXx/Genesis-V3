@@ -112,7 +112,7 @@ class ExecutionPointer:
             for i in range(anzahl):
                 ziel_pos = (ziel_adr + i) % SPEICHER_GROESSE
                 # Materie-Exklusion: nur auf leere Bytes schreiben
-                if welt.lesen(ziel_pos) != 0:
+                if welt.lesen(ziel_pos) not in (0, 42):
                     continue
                 byte_original = welt.lesen((quelle + i) % SPEICHER_GROESSE)
                 byte = byte_original
