@@ -568,6 +568,7 @@ function updateGenome(d){
  el.textContent=d.lesen_extern_anteil!==undefined?d.lesen_extern_anteil.toFixed(2)+'%':'—';
 
  // Ausgeführte Ops
+ let namen=["NOOP","LESEN","SCHREIBEN","ADDIEREN","VERGL_SPR","KOPIEREN","LESEN_EXT","SELBST","SETZEN","ENDE","SCHR_EXT"];
  let execOps=d.ausgefuehrte_ops||{};
  let maxExecOp=Math.max(1,...Object.values(execOps));
  let execBarsHtml='';
@@ -587,7 +588,6 @@ function updateGenome(d){
  let ops=d.operations_verteilung||{};
  let maxOp=Math.max(1,...Object.values(ops));
  let barsHtml='';
- let namen=["NOOP","LESEN","SCHREIBEN","ADDIEREN","VERGL_SPR","KOPIEREN","LESEN_EXT","SELBST","SETZEN","ENDE","SCHR_EXT"];
  namen.forEach(name=>{
   let val=ops[name]||0;
   let pct=(val/maxOp*100).toFixed(0);
@@ -746,7 +746,7 @@ async function refresh(){
   }
   if(currentTab==='population')drawCharts();
  }catch(e){
-  document.getElementById('hdr-status').textContent='Verbindungsfehler';
+  document.getElementById('hdr-status').textContent='Fehler: '+e.message;
  }
 }
 
