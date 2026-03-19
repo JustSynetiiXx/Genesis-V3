@@ -3,16 +3,15 @@ Genesis v3 — Ur-Replikator
 Die einzige Kreatur die wir von Hand schreiben. Alles danach entsteht durch Evolution.
 
 Der Ur-Replikator:
-1. Weiß wo er ist (SELBST)
-2. Vermisst sich selbst (sucht ENDE-Markierung)
-3. Kopiert sich direkt hinter sich
-4. Springt zum Anfang (Endlosschleife)
+1. Frisst — LESEN_EXTERN in verschiedene Richtungen (Wert 42 = +20 Energie)
+2. Repliziert sich — SELBST, SETZEN Größe, ADDIEREN Zieladresse, KOPIEREN
+3. Loopt zurück zu Phase 1 (Endlosschleife)
 
 Register-Nutzung:
-  R0 — Arbeit (gelesener Wert, temporär, Schrittweite)
-  R1 — Scan-Offset / Gesamtgröße in Bytes
-  R2 — ENDE-Opcode (9) zum Vergleichen / dann Zieladresse
-  R3 — Eigene Startadresse (via SELBST)
+  R0 — Startadresse (via SELBST) / temporär
+  R1 — Offset zum Lesen / Genomgröße
+  R2 — Gelesener Wert / Zieladresse
+  R3 — Schleifensteuerung
 """
 
 from interpreter import (
@@ -32,34 +31,30 @@ def erzeuge_ur_replikator() -> bytes:
     def a(befehl, arg1=0, arg2=0, arg3=0):
         code.extend([befehl, arg1, arg2, arg3])
 
-    # === Phase 1: Wisse wo du bist ===
-    a(SELBST, 0, 0, R3)                                #  0: R3 = eigene Startadresse
+    # === Phase 1: Fressen — LESEN_EXTERN in verschiedene Offsets ===
+    a(SETZEN, 10, 0, R1)           #  0: R1 = 10
+    a(LESEN_EXTERN, R1, 0, R2)    #  1: R2 = Speicher[Zellende+10]
+    a(SETZEN, 30, 0, R1)           #  2: R1 = 30
+    a(LESEN_EXTERN, R1, 0, R2)    #  3: R2 = Speicher[Zellende+30]
+    a(SETZEN, 60, 0, R1)           #  4: R1 = 60
+    a(LESEN_EXTERN, R1, 0, R2)    #  5: R2 = Speicher[Zellende+60]
+    a(SETZEN, 100, 0, R1)          #  6: R1 = 100
+    a(LESEN_EXTERN, R1, 0, R2)    #  7: R2 = Speicher[Zellende+100]
+    a(SETZEN, 150, 0, R1)          #  8: R1 = 150
+    a(LESEN_EXTERN, R1, 0, R2)    #  9: R2 = Speicher[Zellende+150]
 
-    # === Phase 2: Vermesse dich selbst ===
-    a(SETZEN, 0, 0, R1)                                #  1: R1 = 0 (Scan-Offset)
-    a(SETZEN, ENDE, 0, R2)                              #  2: R2 = 9 (ENDE-Opcode)
+    # === Phase 2: Replizieren ===
+    a(SELBST, 0, 0, R0)            # 10: R0 = Startadresse
+    a(SETZEN, 68, 0, R1)           # 11: R1 = 68 (Genomgröße in Bytes)
+    a(ADDIEREN, R0, R1, R2)        # 12: R2 = Start + Größe (Zieladresse)
+    a(KOPIEREN, R1, R0, R2)        # 13: Kopiere R1 Bytes [R0]→[R2]
 
-    # --- Scan-Loop: Lies jede 4. Stelle bis ENDE gefunden ---
-    a(ADDIEREN, R3, R1, R0)                             #  3: R0 = Startadresse + Offset
-    a(LESEN, R0, 0, R0)                                 #  4: R0 = Speicher[R0]
-    a(SETZEN, ANWEISUNG_GROESSE, 0, R3)                 #  5: R3 = 4 (temporär für Inkrement)
-    a(ADDIEREN, R1, R3, R1)                             #  6: R1 += 4
-    a(SELBST, 0, 0, R3)                                 #  7: R3 = Startadresse (wiederherstellen)
-    a(VERGLEICHEN_SPRINGEN, R0, R2, (-5) & 0xFF)        #  8: R0 != ENDE? → zu 3
-
-    # R1 = Gesamtgröße in Bytes (inkl. ENDE-Anweisung)
-    # R3 = Startadresse
-
-    # === Phase 3: Zieladresse + Kopieren ===
-    a(ADDIEREN, R3, R1, R2)                             #  9: R2 = Start + Größe (Zieladresse)
-    a(KOPIEREN, R1, R3, R2)                             # 10: Kopiere R1 Bytes [R3]→[R2]
-
-    # === Phase 4: Endlosschleife ===
-    a(SETZEN, 0, 0, R0)                                 # 11: R0 = 0
-    a(VERGLEICHEN_SPRINGEN, R0, R1, (-12) & 0xFF)       # 12: 0 != Größe → zu 0
+    # === Phase 3: Loop zurück ===
+    a(SETZEN, 0, 0, R3)            # 14: R3 = 0
+    a(VERGLEICHEN_SPRINGEN, R0, R3, (-16) & 0xFF)  # 15: R0 != 0 → zu 0
 
     # === Markierung ===
-    a(ENDE, 0, 0, 0)                                    # 13: ENDE
+    a(ENDE, 0, 0, 0)               # 16: ENDE
 
     return bytes(code)
 
@@ -72,7 +67,7 @@ def groesse() -> int:
 if __name__ == "__main__":
     code = erzeuge_ur_replikator()
     namen = ["NOOP", "LESEN", "SCHREIBEN", "ADDIEREN",
-             "VERGL_SPR", "KOPIEREN", "LESEN_EXT", "SELBST", "SETZEN", "ENDE"]
+             "VERGL_SPR", "KOPIEREN", "LESEN_EXT", "SELBST", "SETZEN", "ENDE", "SCHR_EXT"]
     print(f"Ur-Replikator: {len(code)} Bytes ({len(code) // 4} Anweisungen)\n")
     for i in range(0, len(code), 4):
         op = code[i]

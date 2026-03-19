@@ -65,8 +65,7 @@ def simulation_thread():
         platz_frei = MAX_POINTER - len(pointer_liste)
 
         for p in pointer_liste:
-            energie_pro_org = min(400000 // max(len(pointer_liste), 1), 500)
-            p.tick(welt_obj, energie_pro_org)
+            p.tick(welt_obj)
 
             if not p.aktiv:
                 sim_daten["tode_gesamt"] += 1
@@ -101,6 +100,12 @@ def simulation_thread():
         # Verfall
         for _ in range(VERFALL_RATE):
             welt_obj.schreiben(random.randint(0, SPEICHER_GROESSE - 1), 0)
+
+        # Nahrung streuen
+        for _ in range(200):
+            pos = random.randint(0, SPEICHER_GROESSE - 1)
+            if welt_obj.lesen(pos) == 0:
+                welt_obj.schreiben(pos, 42)
 
         # Katastrophen-Physik: Blitz
         if len(pointer_liste) > 100 and random.randint(1, 3000) == 1:
@@ -180,6 +185,7 @@ def analyse_thread():
                 "speicher_prozent": ergebnis["speicher_belegt_prozent"],
                 "lesen_extern": ergebnis["lesen_extern_anteil"],
                 "schreiben_extern": ergebnis.get("schreiben_extern_anteil", 0),
+                "nahrung": ergebnis.get("nahrung_anzahl", 0),
             })
 
             # Max 360 Einträge behalten
@@ -286,6 +292,7 @@ canvas{width:100%;background:#111;border:1px solid #222;border-radius:4px}
   <div class="mini-card"><div class="val" id="h-genomlen">—</div><div class="lbl">Genom Avg</div></div>
   <div class="mini-card"><div class="val" id="h-lesen-ext">—</div><div class="lbl">LESEN_EXT %</div></div>
   <div class="mini-card"><div class="val" id="h-schreiben-ext">—</div><div class="lbl">SCHR_EXT %</div></div>
+  <div class="mini-card"><div class="val" id="h-nahrung">—</div><div class="lbl">NAHRUNG</div></div>
   <div class="mini-card"><div class="val" id="h-ticks">—</div><div class="lbl">Ticks</div></div>
   <div class="mini-card"><div class="val" id="h-tickrate">—</div><div class="lbl">Ticks/s</div></div>
  </div>
@@ -461,6 +468,7 @@ function updateHome(d){
  document.getElementById('h-genomlen').textContent=d.genom_laenge_avg!==undefined?d.genom_laenge_avg.toFixed(0):'—';
  document.getElementById('h-lesen-ext').textContent=d.lesen_extern_anteil!==undefined?d.lesen_extern_anteil.toFixed(2):'—';
  document.getElementById('h-schreiben-ext').textContent=d.schreiben_extern_anteil!==undefined?d.schreiben_extern_anteil.toFixed(2):'—';
+ document.getElementById('h-nahrung').textContent=d.nahrung_anzahl!==undefined?fmt(d.nahrung_anzahl):'—';
  document.getElementById('h-ticks').textContent=fmt(d.tick_nummer);
  document.getElementById('h-tickrate').textContent=fmt(d.ticks_pro_sekunde);
  document.getElementById('h-laufzeit').textContent=fmtTime(d.laufzeit_sekunden);
@@ -727,7 +735,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
         elif path == "/api/export":
             daten = dict(letztes_ergebnis) if letztes_ergebnis else {}
-            daten["historie"] = list(historie)
+            daten.pop("weltkarte", None)
+            daten.pop("pointer_positionen", None)
             if "speicher=1" in query and welt is not None:
                 daten["speicher_base64"] = base64.b64encode(
                     bytes(welt.speicher)
@@ -796,6 +805,9 @@ def main():
     print("=" * 60)
     print()
     print("Simulation startet im Hintergrund...")
+
+    if os.path.exists("meilensteine.json"):
+        os.remove("meilensteine.json")
 
     # Simulation starten
     t_sim = threading.Thread(target=simulation_thread, daemon=True)

@@ -76,7 +76,11 @@ class ExecutionPointer:
             pass
 
         elif befehl == LESEN:
-            r[arg3 % 4] = welt.lesen(r[arg1 % 4] % SPEICHER_GROESSE)
+            quell_adr = r[arg1 % 4] % SPEICHER_GROESSE
+            r[arg3 % 4] = welt.lesen(quell_adr)
+            if r[arg3 % 4] == 42:
+                self.energie += 20
+                welt.schreiben(quell_adr, 0)
             self.sinnvolle_ops += 1
 
         elif befehl == SCHREIBEN:
@@ -126,6 +130,9 @@ class ExecutionPointer:
         elif befehl == LESEN_EXTERN:
             extern_adr = (self._zellende + r[arg1 % 4]) % SPEICHER_GROESSE
             r[arg3 % 4] = welt.lesen(extern_adr)
+            if r[arg3 % 4] == 42:
+                self.energie += 20
+                welt.schreiben(extern_adr, 0)
             self.sinnvolle_ops += 1
 
         elif befehl == SELBST:
@@ -150,8 +157,8 @@ class ExecutionPointer:
         self.adresse += ANWEISUNG_GROESSE
         return True
 
-    def tick(self, welt, energie=200):
-        """200 Energie, dann ausführen bis leer oder tot."""
+    def tick(self, welt, energie=100):
+        """100 Spawn-Energie, Rest durch Fressen."""
         self.energie = energie
         self.sinnvolle_ops = 0
         # Zellgrenze scannen: finde ENDE ab Startadresse

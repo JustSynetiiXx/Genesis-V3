@@ -131,6 +131,10 @@ class Beobachter:
         belegt = SPEICHER_GROESSE - null_bytes
         belegt_prozent = round(belegt / SPEICHER_GROESSE * 100, 2)
 
+        # --- Nahrungsdichte ---
+        nahrung_anzahl = speicher.count(42)
+        nahrung_prozent = round(nahrung_anzahl / SPEICHER_GROESSE * 100, 2)
+
         # --- Weltkarte ---
         karte = self._weltkarte()
 
@@ -156,6 +160,8 @@ class Beobachter:
             },
             "lesen_extern_anteil": lesen_extern_anteil,
             "schreiben_extern_anteil": schreiben_extern_anteil,
+            "nahrung_anzahl": nahrung_anzahl,
+            "nahrung_prozent": nahrung_prozent,
             "weltkarte": list(karte),
             "pointer_positionen": pointer_positionen,
             "tick_nummer": self.sim_daten.get("tick", 0),
