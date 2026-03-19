@@ -169,7 +169,7 @@ class ExecutionPointer:
         self.adresse += ANWEISUNG_GROESSE
         return True
 
-    def tick(self, welt, energie=100):
+    def tick(self, welt, energie=30):
         """100 Spawn-Energie, Rest durch Fressen."""
         self.energie = energie
         self.sinnvolle_ops = 0
