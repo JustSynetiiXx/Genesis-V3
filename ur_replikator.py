@@ -31,30 +31,30 @@ def erzeuge_ur_replikator() -> bytes:
     def a(befehl, arg1=0, arg2=0, arg3=0):
         code.extend([befehl, arg1, arg2, arg3])
 
-    # === Phase 1: Fressen — LESEN_EXTERN in verschiedene Offsets ===
-    a(SETZEN, 10, 0, R1)           #  0: R1 = 10
-    a(LESEN_EXTERN, R1, 0, R2)    #  1: R2 = Speicher[Zellende+10]
-    a(SETZEN, 30, 0, R1)           #  2: R1 = 30
-    a(LESEN_EXTERN, R1, 0, R2)    #  3: R2 = Speicher[Zellende+30]
-    a(SETZEN, 60, 0, R1)           #  4: R1 = 60
-    a(LESEN_EXTERN, R1, 0, R2)    #  5: R2 = Speicher[Zellende+60]
-    a(SETZEN, 100, 0, R1)          #  6: R1 = 100
-    a(LESEN_EXTERN, R1, 0, R2)    #  7: R2 = Speicher[Zellende+100]
-    a(SETZEN, 150, 0, R1)          #  8: R1 = 150
-    a(LESEN_EXTERN, R1, 0, R2)    #  9: R2 = Speicher[Zellende+150]
+    # Phase 1: Fressen — R3 ist roamender Offset, wandert jede Runde weiter
+    a(LESEN_EXTERN, R3, 0, R2)      #  0: Lies Speicher[Zellende+R3]
+    a(SETZEN, 7, 0, R1)             #  1: R1 = 7 (Schrittweite)
+    a(ADDIEREN, R3, R1, R3)         #  2: R3 += 7
+    a(LESEN_EXTERN, R3, 0, R2)      #  3: Lies Speicher[Zellende+R3]
+    a(ADDIEREN, R3, R1, R3)         #  4: R3 += 7
+    a(LESEN_EXTERN, R3, 0, R2)      #  5: Lies Speicher[Zellende+R3]
+    a(ADDIEREN, R3, R1, R3)         #  6: R3 += 7
+    a(LESEN_EXTERN, R3, 0, R2)      #  7: Lies Speicher[Zellende+R3]
+    a(ADDIEREN, R3, R1, R3)         #  8: R3 += 7
+    a(LESEN_EXTERN, R3, 0, R2)      #  9: Lies Speicher[Zellende+R3]
+    a(ADDIEREN, R3, R1, R3)         # 10: R3 += 7 (fuer naechsten Loop)
 
-    # === Phase 2: Replizieren ===
-    a(SELBST, 0, 0, R0)            # 10: R0 = Startadresse
-    a(SETZEN, 68, 0, R1)           # 11: R1 = 68 (Genomgröße in Bytes)
-    a(ADDIEREN, R0, R1, R2)        # 12: R2 = Start + Größe (Zieladresse)
-    a(KOPIEREN, R1, R0, R2)        # 13: Kopiere R1 Bytes [R0]→[R2]
+    # Phase 2: Replizieren
+    a(SELBST, 0, 0, R0)             # 11: R0 = Startadresse
+    a(SETZEN, 72, 0, R1)            # 12: R1 = 72 (Genomgroesse)
+    a(ADDIEREN, R0, R1, R2)         # 13: R2 = Zieladresse
+    a(KOPIEREN, R1, R0, R2)         # 14: Kopiere
 
-    # === Phase 3: Loop zurück ===
-    a(SETZEN, 0, 0, R3)            # 14: R3 = 0
-    a(VERGLEICHEN_SPRINGEN, R0, R3, (-16) & 0xFF)  # 15: R0 != 0 → zu 0
+    # Phase 3: Loop
+    a(SETZEN, 0, 0, R1)             # 15: R1 = 0
+    a(VERGLEICHEN_SPRINGEN, R3, R1, (-16) & 0xFF)  # 16: R3 != 0 → zu 0
 
-    # === Markierung ===
-    a(ENDE, 0, 0, 0)               # 16: ENDE
+    a(ENDE, 0, 0, 0)                # 17: ENDE
 
     return bytes(code)
 
