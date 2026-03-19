@@ -66,6 +66,11 @@ class ExecutionPointer:
         if not self.aktiv or self.energie <= 0:
             return False
 
+        # Tick-Limit: maximal 500 Schritte pro Tick
+        if self._schritte_im_tick >= 500:
+            return False
+        self._schritte_im_tick += 1
+
         self.energie -= 1
 
         adr = self.adresse % SPEICHER_GROESSE
@@ -168,6 +173,7 @@ class ExecutionPointer:
         """100 Spawn-Energie, Rest durch Fressen."""
         self.energie = energie
         self.sinnvolle_ops = 0
+        self._schritte_im_tick = 0
         # Zellgrenze scannen: finde ENDE ab Startadresse
         self._zellende = self.startadresse
         for i in range(0, 1024, 4):

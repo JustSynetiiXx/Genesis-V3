@@ -37,6 +37,7 @@ letztes_ergebnis = {}
 historie = []  # Letzte 900 Datenpunkte (30 min bei 2s)
 sim_laeuft = True
 letzter_blitz = None  # {"tick": ..., "zeitstempel": ..., "population_vor": ...}
+letztes_analyse_ergebnis = {}
 
 
 def simulation_thread():
@@ -188,6 +189,14 @@ def analyse_thread():
                 ergebnis["ausgefuehrte_schr_ext_prozent"] = 0
 
             letztes_ergebnis = ergebnis
+
+            # Wahrnehmungsanalyse cachen
+            try:
+                wahrnehmung = beobachter.analyse_wahrnehmung()
+                global letztes_analyse_ergebnis
+                letztes_analyse_ergebnis = wahrnehmung
+            except Exception:
+                pass
 
             # Historie speichern (kompakt)
             historie.append({
@@ -700,19 +709,26 @@ function updateAnalyse(d){
 
 async function refresh(){
  try{
-  let [statusRes,histRes,analyseRes]=await Promise.all([
+  let fetches=[
    fetch('/api/status'),
    fetch('/api/history'),
    fetch('/api/analyse')
-  ]);
-  let d=await statusRes.json();
-  let h=await histRes.json();
-  let a=await analyseRes.json();
+  ];
+  if(currentTab==='weltkarte'){
+   fetches.push(fetch('/api/weltkarte'));
+  }
+  let results=await Promise.all(fetches);
+  let d=await results[0].json();
+  let h=await results[1].json();
+  let a=await results[2].json();
   historyData=h;
   updateHome(d);
-  updateWeltkarte(d);
   updateGenome(d);
   updateAnalyse(a);
+  if(currentTab==='weltkarte'&&results[3]){
+   let w=await results[3].json();
+   updateWeltkarte(w);
+  }
   if(currentTab==='population')drawCharts();
  }catch(e){
   document.getElementById('hdr-status').textContent='Verbindungsfehler';
@@ -756,6 +772,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
         elif path == "/api/status":
             daten = dict(letztes_ergebnis) if letztes_ergebnis else {}
+            daten.pop("weltkarte", None)
+            daten.pop("pointer_positionen", None)
             if letzter_blitz:
                 daten["letzter_blitz"] = letzter_blitz
             self._json_response(daten)
@@ -786,17 +804,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._json_response(list(historie))
 
         elif path == "/api/analyse":
-            try:
-                with sim_lock:
-                    pointer_kopie = list(pointer)
-                if welt is not None:
-                    beobachter = Beobachter(welt, pointer_kopie, sim_daten)
-                    ergebnis = beobachter.analyse_wahrnehmung()
-                    self._json_response(ergebnis)
-                else:
-                    self._json_response({"anzahl": 0, "gesamt": 0, "prozent": 0, "top5": [], "meilensteine": []})
-            except Exception as e:
-                self._json_response({"error": str(e)})
+            self._json_response(letztes_analyse_ergebnis if letztes_analyse_ergebnis else {"anzahl": 0, "gesamt": 0, "prozent": 0, "top5": [], "meilensteine": []})
 
         elif path == "/api/trace":
             try:
