@@ -101,10 +101,11 @@ class ExecutionPointer:
             self.sinnvolle_ops += 1
 
         elif befehl == VERGLEICHEN_SPRINGEN:
-            self.sinnvolle_ops += 1
+            sprung_tmp = arg3 if arg3 < 128 else arg3 - 256
+            if sprung_tmp != 0:
+                self.sinnvolle_ops += 1
             if r[arg1 % 4] != r[arg2 % 4]:
-                sprung = arg3 if arg3 < 128 else arg3 - 256
-                self.adresse += sprung * ANWEISUNG_GROESSE
+                self.adresse += sprung_tmp * ANWEISUNG_GROESSE
                 return True
 
         elif befehl == KOPIEREN:
