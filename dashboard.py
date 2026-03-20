@@ -124,7 +124,7 @@ def simulation_thread():
             belegte_adressen.add(start)
 
         # Katastrophen-Physik: Blitz
-        if False:  # Blitze deaktiviert bis stabil
+        if len(pointer_liste) > 500 and random.randint(1, 3000) == 1:
             pop_vor = len(pointer_liste)
             blitz_bytes = SPEICHER_GROESSE // 15
             blitz_start = random.randint(0, SPEICHER_GROESSE - 1)
