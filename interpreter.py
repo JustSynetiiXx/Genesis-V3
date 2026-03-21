@@ -61,132 +61,143 @@ class ExecutionPointer:
         self.sinnvolle_ops = 0  # Nicht-NOOP Ops pro Tick
         self.leerlauf_ticks = 0 # Aufeinanderfolgende Ticks ohne sinnvolle Ops
 
-    def schritt(self, welt: Welt) -> bool:
-        """Eine Operation ausführen. False wenn gestoppt."""
-        if not self.aktiv or self.energie <= 0:
-            return False
-
-        # Tick-Limit: maximal 500 Schritte pro Tick
-        if self._schritte_im_tick >= 500:
-            return False
-        self._schritte_im_tick += 1
-
-        self.energie -= 1
-
-        adr = self.adresse % SPEICHER_GROESSE
-        befehl = welt.lesen(adr)
-        arg1 = welt.lesen(adr + 1)
-        arg2 = welt.lesen(adr + 2)
-        arg3 = welt.lesen(adr + 3)
-
-        if befehl < 11:
-            ausgefuehrte_ops[befehl] += 1
-
+    def tick(self, welt, energie=100):
+        """Inline-Hauptschleife. Kein schritt()-Aufruf mehr für Performance."""
+        # Lokale Variablen sind ~30% schneller als self.xxx
+        speicher = welt.speicher
+        GROESSE = SPEICHER_GROESSE
+        adresse = self.adresse
+        startadresse = self.startadresse
         r = self.register
+        energie_lokal = energie
+        sinnvolle_ops = 0
+        schritte = 0
+        neue_pointer = self.neue_pointer
+        mutationen = self.mutationen
+        kopier_events = 0
+        aktiv = True
+        _randint = random.randint
+        _ausgefuehrte_ops = ausgefuehrte_ops
 
-        if befehl == NOOP:
-            pass
-
-        elif befehl == LESEN:
-            quell_adr = r[arg1 % 4] % SPEICHER_GROESSE
-            r[arg3 % 4] = welt.lesen(quell_adr)
-            self.sinnvolle_ops += 1
-
-        elif befehl == SCHREIBEN:
-            welt.schreiben(r[arg3 % 4] % SPEICHER_GROESSE, r[arg1 % 4] & 0xFF)
-            self.sinnvolle_ops += 1
-
-        elif befehl == ADDIEREN:
-            r[arg3 % 4] = r[arg1 % 4] + r[arg2 % 4]
-            self.sinnvolle_ops += 1
-
-        elif befehl == VERGLEICHEN_SPRINGEN:
-            sprung_tmp = arg3 if arg3 < 128 else arg3 - 256
-            if sprung_tmp != 0:
-                self.sinnvolle_ops += 1
-            if r[arg1 % 4] != r[arg2 % 4]:
-                self.adresse += sprung_tmp * ANWEISUNG_GROESSE
-                return True
-
-        elif befehl == KOPIEREN:
-            anzahl = min(r[arg1 % 4], 1024)  # Max 1024 Bytes pro Kopie
-            quelle = r[arg2 % 4]
-            ziel_adr = r[arg3 % 4]
-            # Energie-Kosten: 1 Energie pro 4 kopierte Bytes, Minimum 1
-            kopier_kosten = max(anzahl // 4, 1)
-            # Bei zu wenig Energie: nur so viel kopieren wie Energie reicht
-            if kopier_kosten > self.energie:
-                anzahl = self.energie * 4
-                kopier_kosten = max(anzahl // 4, 1)
-            self.energie -= kopier_kosten
-            for i in range(anzahl):
-                ziel_pos = (ziel_adr + i) % SPEICHER_GROESSE
-                # Materie-Exklusion: nur auf leere Bytes schreiben
-                if welt.lesen(ziel_pos) not in (0, 42):
-                    continue
-                byte_original = welt.lesen((quelle + i) % SPEICHER_GROESSE)
-                byte = byte_original
-                if random.randint(1, MUTATIONSRATE) == 1:
-                    byte = random.randint(0, 255)
-                    if byte != byte_original:
-                        self.mutationen.append((i, quelle, ziel_adr, byte_original, byte))
-                welt.schreiben(ziel_pos, byte)
-            # Physik: Kopierter Code >= 20 Bytes wird lebendig
-            if anzahl >= 20:
-                self.neue_pointer.append(ziel_adr % SPEICHER_GROESSE)
-                self.kopier_events += 1
-            self.sinnvolle_ops += 1
-
-        elif befehl == LESEN_EXTERN:
-            extern_adr = (self._zellende + r[arg1 % 4]) % SPEICHER_GROESSE
-            r[arg3 % 4] = welt.lesen(extern_adr)
-            if r[arg3 % 4] == 42:
-                self.energie += 20
-                welt.schreiben(extern_adr, 0)
-            self.sinnvolle_ops += 1
-
-        elif befehl == SELBST:
-            r[arg3 % 4] = self.startadresse
-            self.sinnvolle_ops += 1
-
-        elif befehl == SETZEN:
-            r[arg3 % 4] = arg1
-            self.sinnvolle_ops += 1
-
-        elif befehl == ENDE:
-            self.aktiv = False
-            return False
-
-        elif befehl == 10:  # SCHREIBEN_EXTERN
-            extern_adr = (self._zellende + r[arg3 % 4]) % SPEICHER_GROESSE
-            welt.schreiben(extern_adr, r[arg1 % 4] & 0xFF)  # KEINE Materie-Exklusion
-            self.sinnvolle_ops += 1
-
-        # Ungültiger Opcode (> 10): tue nichts, verbrauche Energie
-
-        self.adresse += ANWEISUNG_GROESSE
-        return True
-
-    def tick(self, welt, energie=30):
-        """100 Spawn-Energie, Rest durch Fressen."""
-        self.energie = energie
-        self.sinnvolle_ops = 0
-        self._schritte_im_tick = 0
-        # Zellgrenze scannen: finde ENDE ab Startadresse
-        self._zellende = self.startadresse
+        # Zellgrenze scannen
+        zellende = startadresse
         for i in range(0, 1024, 4):
-            pos = (self.startadresse + i) % SPEICHER_GROESSE
-            if welt.lesen(pos) == ENDE:
-                self._zellende = (self.startadresse + i + 4) % SPEICHER_GROESSE
+            pos = (startadresse + i) % GROESSE
+            if speicher[pos] == 9:  # ENDE
+                zellende = (startadresse + i + 4) % GROESSE
                 break
         else:
-            self._zellende = (self.startadresse + 1024) % SPEICHER_GROESSE
-        while self.schritt(welt):
-            # Bounds-Check: Kein Wraparound erlaubt
-            if self.adresse < 0 or self.adresse >= SPEICHER_GROESSE:
-                self.aktiv = False
+            zellende = (startadresse + 1024) % GROESSE
+
+        # Hauptschleife — KEIN Methodenaufruf pro Schritt
+        while aktiv and energie_lokal > 0 and schritte < 500:
+            energie_lokal -= 1
+            schritte += 1
+
+            adr = adresse % GROESSE
+            befehl = speicher[adr]
+            arg1 = speicher[(adr + 1) % GROESSE]
+            arg2 = speicher[(adr + 2) % GROESSE]
+            arg3 = speicher[(adr + 3) % GROESSE]
+
+            # Ausführungszähler
+            if befehl < 11:
+                _ausgefuehrte_ops[befehl] += 1
+
+            if befehl == 0:  # NOOP
+                pass
+
+            elif befehl == 1:  # LESEN
+                quell_adr = r[arg1 % 4] % GROESSE
+                wert = speicher[quell_adr]
+                r[arg3 % 4] = wert
+                if wert == 42:
+                    energie_lokal += 20
+                    speicher[quell_adr] = 0
+                sinnvolle_ops += 1
+
+            elif befehl == 2:  # SCHREIBEN
+                speicher[r[arg3 % 4] % GROESSE] = r[arg1 % 4] & 0xFF
+                sinnvolle_ops += 1
+
+            elif befehl == 3:  # ADDIEREN
+                r[arg3 % 4] = r[arg1 % 4] + r[arg2 % 4]
+                sinnvolle_ops += 1
+
+            elif befehl == 4:  # VERGLEICHEN_SPRINGEN
+                sinnvolle_ops += 1
+                if r[arg1 % 4] != r[arg2 % 4]:
+                    sprung = arg3 if arg3 < 128 else arg3 - 256
+                    adresse += sprung * 4
+                    if adresse < 0 or adresse >= GROESSE:
+                        aktiv = False
+                        break
+                    continue
+
+            elif befehl == 5:  # KOPIEREN
+                anzahl = min(r[arg1 % 4], 1024)
+                quelle = r[arg2 % 4]
+                ziel_adr = r[arg3 % 4]
+                kopier_kosten = max(anzahl // 4, 1)
+                if kopier_kosten > energie_lokal:
+                    anzahl = energie_lokal * 4
+                    kopier_kosten = max(anzahl // 4, 1)
+                energie_lokal -= kopier_kosten
+                for i in range(anzahl):
+                    ziel_pos = (ziel_adr + i) % GROESSE
+                    if speicher[ziel_pos] != 0:
+                        continue
+                    byte_original = speicher[(quelle + i) % GROESSE]
+                    byte_val = byte_original
+                    if _randint(1, MUTATIONSRATE) == 1:
+                        byte_val = _randint(0, 255)
+                        if byte_val != byte_original:
+                            mutationen.append((i, quelle, ziel_adr, byte_original, byte_val))
+                    speicher[ziel_pos] = byte_val
+                if anzahl >= 20:
+                    neue_pointer.append(ziel_adr % GROESSE)
+                    kopier_events += 1
+                sinnvolle_ops += 1
+
+            elif befehl == 6:  # LESEN_EXTERN
+                extern_adr = (zellende + r[arg1 % 4]) % GROESSE
+                wert = speicher[extern_adr]
+                r[arg3 % 4] = wert
+                if wert == 42:
+                    energie_lokal += 20
+                    speicher[extern_adr] = 0
+                sinnvolle_ops += 1
+
+            elif befehl == 7:  # SELBST
+                r[arg3 % 4] = startadresse
+                sinnvolle_ops += 1
+
+            elif befehl == 8:  # SETZEN
+                r[arg3 % 4] = arg1
+                sinnvolle_ops += 1
+
+            elif befehl == 9:  # ENDE
+                aktiv = False
                 break
-        if self.sinnvolle_ops == 0:
+
+            elif befehl == 10:  # SCHREIBEN_EXTERN
+                extern_adr = (zellende + r[arg3 % 4]) % GROESSE
+                speicher[extern_adr] = r[arg1 % 4] & 0xFF
+                sinnvolle_ops += 1
+
+            # Ungültiger Opcode: nichts tun
+
+            adresse += 4
+            if adresse < 0 or adresse >= GROESSE:
+                aktiv = False
+                break
+
+        # Zurückschreiben
+        self.adresse = adresse
+        self.aktiv = aktiv
+        self.energie = energie_lokal
+        self.kopier_events = kopier_events
+        if sinnvolle_ops == 0:
             self.leerlauf_ticks += 1
         else:
             self.leerlauf_ticks = 0
