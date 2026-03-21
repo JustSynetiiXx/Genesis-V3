@@ -111,9 +111,6 @@ class ExecutionPointer:
                 quell_adr = r[arg1 % 4] % GROESSE
                 wert = speicher[quell_adr]
                 r[arg3 % 4] = wert
-                if wert == 42:
-                    energie_lokal += 20
-                    speicher[quell_adr] = 0
                 sinnvolle_ops += 1
 
             elif befehl == 2:  # SCHREIBEN
@@ -125,9 +122,10 @@ class ExecutionPointer:
                 sinnvolle_ops += 1
 
             elif befehl == 4:  # VERGLEICHEN_SPRINGEN
-                sinnvolle_ops += 1
+                sprung = arg3 if arg3 < 128 else arg3 - 256
+                if sprung != 0:
+                    sinnvolle_ops += 1
                 if r[arg1 % 4] != r[arg2 % 4]:
-                    sprung = arg3 if arg3 < 128 else arg3 - 256
                     adresse += sprung * 4
                     if adresse < 0 or adresse >= GROESSE:
                         aktiv = False
@@ -145,7 +143,7 @@ class ExecutionPointer:
                 energie_lokal -= kopier_kosten
                 for i in range(anzahl):
                     ziel_pos = (ziel_adr + i) % GROESSE
-                    if speicher[ziel_pos] != 0:
+                    if speicher[ziel_pos] not in (0, 42):
                         continue
                     byte_original = speicher[(quelle + i) % GROESSE]
                     byte_val = byte_original
