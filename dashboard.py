@@ -1,6 +1,6 @@
 """
 Genesis v3 — Dashboard (Schicht 3)
-Web-Server auf Port 8080. Liest Daten vom Rust-Core via /tmp/genesis_output.log.
+Web-Server auf Port 8080. Holt Daten vom Rust-Core HTTP-API auf Port 8081.
 Starten: python3 dashboard.py
 """
 
@@ -8,38 +8,40 @@ import json
 import time
 import threading
 import os
+import urllib.request
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # === Konfiguration ===
-LOG_PFAD = "/tmp/genesis_output.log"
+RUST_API = "http://localhost:8081"
 POLL_INTERVALL = 2  # Sekunden
 
 # === Globaler Zustand ===
 letztes_ergebnis = {}
 historie = []  # Letzte 900 Datenpunkte (30 min bei 2s)
-startzeit = time.time()
+
+
+def fetch_rust(endpoint):
+    """Holt JSON von der Rust-Core HTTP-API."""
+    try:
+        req = urllib.request.Request(RUST_API + endpoint)
+        with urllib.request.urlopen(req, timeout=2) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        return {}
 
 
 def get_latest_data():
-    """Liest die letzte JSON-Zeile aus dem Rust-Core-Log."""
-    try:
-        with open(LOG_PFAD, "r") as f:
-            lines = f.readlines()
-            if lines:
-                return json.loads(lines[-1])
-    except Exception:
-        return {}
-    return {}
+    """Holt /api/export vom Rust-Core."""
+    return fetch_rust("/api/export")
 
 
-def rust_zu_dashboard(rust):
-    """Mappt Rust-JSON-Felder auf Dashboard-Felder."""
-    if not rust:
+def enrich_data(d):
+    """Berechnet abgeleitete Felder die das Dashboard-JS erwartet."""
+    if not d:
         return {}
 
-    laufzeit = time.time() - startzeit
-    ops = rust.get("ausgefuehrte_ops", {})
-    ops_total = rust.get("ausgefuehrte_ops_total", 0)
+    ops = d.get("ausgefuehrte_ops", {})
+    ops_total = d.get("ausgefuehrte_ops_total", 0)
 
     if ops_total > 0:
         lesen_ext_pct = round(ops.get("LESEN_EXT", 0) / ops_total * 100, 2)
@@ -48,60 +50,37 @@ def rust_zu_dashboard(rust):
         lesen_ext_pct = 0
         schr_ext_pct = 0
 
-    return {
-        "tick_nummer": rust.get("tick", 0),
-        "population": rust.get("population", 0),
-        "nahrung_anzahl": rust.get("nahrung_anzahl", 0),
-        "nahrung_prozent": rust.get("nahrung_prozent", 0),
-        "genom_laenge_avg": rust.get("genom_laenge_avg", 0),
-        "genom_laenge_min": rust.get("genom_laenge_min", 0),
-        "genom_laenge_max": rust.get("genom_laenge_max", 0),
-        "ticks_pro_sekunde": rust.get("ticks_pro_sekunde", 0),
-        "speicher_belegt_prozent": rust.get("speicher_belegt_prozent", 0),
-        "geburten_gesamt": rust.get("geburten_gesamt", 0),
-        "tode_gesamt": rust.get("tode_gesamt", 0),
-        "ausgefuehrte_ops": ops,
-        "ausgefuehrte_ops_total": ops_total,
-        "ausgefuehrte_lesen_ext_prozent": lesen_ext_pct,
-        "ausgefuehrte_schr_ext_prozent": schr_ext_pct,
-        "laufzeit_sekunden": round(laufzeit, 1),
-        # Felder die der Rust-Core nicht liefert
-        "diversitaet": 0,
-        "diversitaet_shannon": 0.0,
-        "population_max": rust.get("population", 0),
-        "lesen_extern_anteil": lesen_ext_pct,
-        "schreiben_extern_anteil": schr_ext_pct,
-        "operations_verteilung": ops,
-        "top_genome": [],
-        "weltkarte": [],
-        "pointer_positionen": [],
-    }
+    d["ausgefuehrte_lesen_ext_prozent"] = lesen_ext_pct
+    d["ausgefuehrte_schr_ext_prozent"] = schr_ext_pct
+    d["lesen_extern_anteil"] = lesen_ext_pct
+    d["schreiben_extern_anteil"] = schr_ext_pct
+    return d
 
 
 def poll_thread():
-    """Pollt regelmäßig das Log und aktualisiert Historie."""
+    """Pollt regelmäßig die Rust-API und aktualisiert Historie."""
     global letztes_ergebnis
 
     while True:
         time.sleep(POLL_INTERVALL)
-        rust = get_latest_data()
-        if not rust:
+        daten = get_latest_data()
+        if not daten:
             continue
 
-        daten = rust_zu_dashboard(rust)
+        daten = enrich_data(daten)
         letztes_ergebnis = daten
 
         historie.append({
-            "tick": daten["tick_nummer"],
-            "zeit": daten["laufzeit_sekunden"],
-            "population": daten["population"],
-            "geburten": daten["geburten_gesamt"],
-            "tode": daten["tode_gesamt"],
-            "diversitaet": daten["diversitaet"],
-            "shannon": daten["diversitaet_shannon"],
-            "genom_laenge_avg": daten["genom_laenge_avg"],
-            "speicher_prozent": daten["speicher_belegt_prozent"],
-            "lesen_extern": daten["lesen_extern_anteil"],
+            "tick": daten.get("tick_nummer", 0),
+            "zeit": daten.get("laufzeit_sekunden", 0),
+            "population": daten.get("population", 0),
+            "geburten": daten.get("geburten_gesamt", 0),
+            "tode": daten.get("tode_gesamt", 0),
+            "diversitaet": daten.get("diversitaet", 0),
+            "shannon": daten.get("diversitaet_shannon", 0),
+            "genom_laenge_avg": daten.get("genom_laenge_avg", 0),
+            "speicher_prozent": daten.get("speicher_belegt_prozent", 0),
+            "lesen_extern": daten.get("lesen_extern_anteil", 0),
             "schreiben_extern": daten.get("schreiben_extern_anteil", 0),
             "nahrung": daten.get("nahrung_anzahl", 0),
             "lesen_ext_exec": daten.get("ausgefuehrte_lesen_ext_prozent", 0),
@@ -658,16 +637,16 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._html_response(DASHBOARD_HTML)
 
         elif path == "/api/status":
-            daten = dict(letztes_ergebnis) if letztes_ergebnis else rust_zu_dashboard(get_latest_data())
-            daten.pop("weltkarte", None)
-            daten.pop("pointer_positionen", None)
+            daten = dict(letztes_ergebnis) if letztes_ergebnis else enrich_data(fetch_rust("/api/status"))
+            daten.pop("top_genome", None)
+            daten.pop("operations_verteilung", None)
             self._json_response(daten)
 
         elif path == "/api/weltkarte":
-            self._json_response({"weltkarte": [], "pointer_positionen": []})
+            self._json_response(fetch_rust("/api/weltkarte"))
 
         elif path == "/api/genome":
-            daten = letztes_ergebnis if letztes_ergebnis else rust_zu_dashboard(get_latest_data())
+            daten = letztes_ergebnis if letztes_ergebnis else enrich_data(get_latest_data())
             self._json_response({
                 "top_genome": daten.get("top_genome", []),
                 "operations_verteilung": daten.get("operations_verteilung", {}),
@@ -675,9 +654,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             })
 
         elif path == "/api/export":
-            daten = dict(letztes_ergebnis) if letztes_ergebnis else rust_zu_dashboard(get_latest_data())
-            daten.pop("weltkarte", None)
-            daten.pop("pointer_positionen", None)
+            daten = dict(letztes_ergebnis) if letztes_ergebnis else enrich_data(get_latest_data())
             self._json_response(daten)
 
         elif path == "/api/history":
@@ -706,9 +683,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
 def main():
     print("=" * 60)
-    print("  Genesis v3 — Dashboard (Rust-Core Anbindung)")
-    print("  http://0.0.0.0:8080")
-    print(f"  Liest Daten aus: {LOG_PFAD}")
+    print("  Genesis v3 — Dashboard (Rust-Core HTTP-API)")
+    print("  Dashboard:  http://0.0.0.0:8080")
+    print(f"  Rust-API:   {RUST_API}")
     print("=" * 60)
     print()
 
