@@ -1,242 +1,115 @@
 """
 Genesis v3 — Dashboard (Schicht 3)
-Web-Server auf Port 8080. Startet die Simulation im Hintergrund.
+Web-Server auf Port 8080. Liest Daten vom Rust-Core via /tmp/genesis_output.log.
 Starten: python3 dashboard.py
 """
 
 import json
 import time
 import threading
-import random
 import os
-import base64
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
-from welt import Welt, SPEICHER_GROESSE
-from interpreter import ExecutionPointer, ENDE, ausgefuehrte_ops
-from ur_replikator import erzeuge_ur_replikator
-from beobachter import Beobachter
-
-# === Simulations-Parameter ===
-MAX_POINTER = 2000
-VERFALL_RATE = 100
-ANALYSE_INTERVALL = 2  # Sekunden
+# === Konfiguration ===
+LOG_PFAD = "/tmp/genesis_output.log"
+POLL_INTERVALL = 2  # Sekunden
 
 # === Globaler Zustand ===
-sim_lock = threading.Lock()
-welt = None
-pointer = []
-sim_daten = {
-    "tick": 0,
-    "geburten_gesamt": 0,
-    "tode_gesamt": 0,
-    "max_pointer": MAX_POINTER,
-    "startzeit": 0,
-}
 letztes_ergebnis = {}
 historie = []  # Letzte 900 Datenpunkte (30 min bei 2s)
-sim_laeuft = True
-letzter_blitz = None  # {"tick": ..., "zeitstempel": ..., "population_vor": ...}
-letztes_analyse_ergebnis = {}
+startzeit = time.time()
 
 
-def simulation_thread():
-    """Simulation läuft in eigenem Thread."""
-    global welt, pointer, sim_laeuft
-
-    welt_obj = Welt()
-    code = erzeuge_ur_replikator()
-    for i, byte in enumerate(code):
-        welt_obj.schreiben(i, byte)
-
-    # Nahrung vorfuellen (~20% des Speichers)
-    for _ in range(SPEICHER_GROESSE // 5):
-        pos = random.randint(0, SPEICHER_GROESSE - 1)
-        if welt_obj.lesen(pos) == 0:
-            welt_obj.schreiben(pos, 42)
-    pointer_liste = [ExecutionPointer(0)]
-    belegte_adressen = {0}
-
-    with sim_lock:
-        welt = welt_obj
-        pointer.clear()
-        pointer.extend(pointer_liste)
-        sim_daten["startzeit"] = time.time()
-
-    tick = 0
-
-    while sim_laeuft:
-        tick += 1
-        neue_pointer = []
-        platz_frei = MAX_POINTER - len(pointer_liste)
-
-        for p in pointer_liste:
-            p.tick(welt_obj)
-
-            for adr in p.neue_pointer:
-                if adr in belegte_adressen:
-                    continue
-                if platz_frei - len(neue_pointer) <= 0:
-                    break
-                neuer = ExecutionPointer(adr)
-                neue_pointer.append(neuer)
-                belegte_adressen.add(adr)
-                sim_daten["geburten_gesamt"] += 1
-            p.neue_pointer.clear()
-
-            if not p.aktiv:
-                sim_daten["tode_gesamt"] += 1
-                belegte_adressen.discard(p.startadresse)
-                continue
-
-            if p.leerlauf_ticks >= 10:
-                p.aktiv = False
-                sim_daten["tode_gesamt"] += 1
-                belegte_adressen.discard(p.startadresse)
-                continue
-
-            if p.kopier_events > 0:
-                p.kopier_events = 0
-
-            p.mutationen.clear()
-
-        pointer_liste = [p for p in pointer_liste if p.aktiv]
-        pointer_liste.extend(neue_pointer)
-
-        # Verfall
-        for _ in range(VERFALL_RATE):
-            welt_obj.schreiben(random.randint(0, SPEICHER_GROESSE - 1), 0)
-
-        # Nahrung streuen
-        for _ in range(200):
-            pos = random.randint(0, SPEICHER_GROESSE - 1)
-            if welt_obj.lesen(pos) == 0:
-                welt_obj.schreiben(pos, 42)
-
-        # Abiogenese: Wenn alles tot, neues Leben
-        if len(pointer_liste) == 0:
-            code = erzeuge_ur_replikator()
-            start = random.randint(0, SPEICHER_GROESSE - len(code))
-            for i, byte in enumerate(code):
-                welt_obj.schreiben(start + i, byte)
-            pointer_liste.append(ExecutionPointer(start))
-            belegte_adressen.clear()
-            belegte_adressen.add(start)
-
-        # Katastrophen-Physik: Blitz
-        if len(pointer_liste) > 500 and random.randint(1, 3000) == 1:
-            pop_vor = len(pointer_liste)
-            blitz_bytes = SPEICHER_GROESSE // 15
-            blitz_start = random.randint(0, SPEICHER_GROESSE - 1)
-            for i in range(blitz_bytes):
-                welt_obj.schreiben((blitz_start + i) % SPEICHER_GROESSE, 0)
-            global letzter_blitz
-            letzter_blitz = {
-                "tick": tick,
-                "zeitstempel": time.strftime("%Y-%m-%d %H:%M:%S"),
-                "population_vor": pop_vor,
-            }
-            # Meilenstein loggen
-            try:
-                meilenstein_pfad = "meilensteine.json"
-                meilensteine = []
-                if os.path.exists(meilenstein_pfad):
-                    with open(meilenstein_pfad, "r") as f:
-                        meilensteine = json.load(f)
-                meilensteine.append({
-                    "typ": "blitz",
-                    "tick": tick,
-                    "zeitstempel": letzter_blitz["zeitstempel"],
-                    "population_vor": pop_vor,
-                    "beschreibung": f"Blitz bei Tick {tick}: {pop_vor} Organismen vor dem Einschlag. Verluste in folgenden Ticks sichtbar.",
-                })
-                with open(meilenstein_pfad, "w") as f:
-                    json.dump(meilensteine, f, ensure_ascii=False, indent=2)
-            except Exception:
-                pass
-
-        sim_daten["tick"] = tick
-
-        # Pointer-Referenz aktualisieren für Beobachter
-        with sim_lock:
-            pointer.clear()
-            pointer.extend(pointer_liste)
+def get_latest_data():
+    """Liest die letzte JSON-Zeile aus dem Rust-Core-Log."""
+    try:
+        with open(LOG_PFAD, "r") as f:
+            lines = f.readlines()
+            if lines:
+                return json.loads(lines[-1])
+    except Exception:
+        return {}
+    return {}
 
 
-def analyse_thread():
-    """Analysiert alle ANALYSE_INTERVALL Sekunden."""
+def rust_zu_dashboard(rust):
+    """Mappt Rust-JSON-Felder auf Dashboard-Felder."""
+    if not rust:
+        return {}
+
+    laufzeit = time.time() - startzeit
+    ops = rust.get("ausgefuehrte_ops", {})
+    ops_total = rust.get("ausgefuehrte_ops_total", 0)
+
+    if ops_total > 0:
+        lesen_ext_pct = round(ops.get("LESEN_EXT", 0) / ops_total * 100, 2)
+        schr_ext_pct = round(ops.get("SCHR_EXT", 0) / ops_total * 100, 2)
+    else:
+        lesen_ext_pct = 0
+        schr_ext_pct = 0
+
+    return {
+        "tick_nummer": rust.get("tick", 0),
+        "population": rust.get("population", 0),
+        "nahrung_anzahl": rust.get("nahrung_anzahl", 0),
+        "nahrung_prozent": rust.get("nahrung_prozent", 0),
+        "genom_laenge_avg": rust.get("genom_laenge_avg", 0),
+        "genom_laenge_min": rust.get("genom_laenge_min", 0),
+        "genom_laenge_max": rust.get("genom_laenge_max", 0),
+        "ticks_pro_sekunde": rust.get("ticks_pro_sekunde", 0),
+        "speicher_belegt_prozent": rust.get("speicher_belegt_prozent", 0),
+        "geburten_gesamt": rust.get("geburten_gesamt", 0),
+        "tode_gesamt": rust.get("tode_gesamt", 0),
+        "ausgefuehrte_ops": ops,
+        "ausgefuehrte_ops_total": ops_total,
+        "ausgefuehrte_lesen_ext_prozent": lesen_ext_pct,
+        "ausgefuehrte_schr_ext_prozent": schr_ext_pct,
+        "laufzeit_sekunden": round(laufzeit, 1),
+        # Felder die der Rust-Core nicht liefert
+        "diversitaet": 0,
+        "diversitaet_shannon": 0.0,
+        "population_max": rust.get("population", 0),
+        "lesen_extern_anteil": lesen_ext_pct,
+        "schreiben_extern_anteil": schr_ext_pct,
+        "operations_verteilung": ops,
+        "top_genome": [],
+        "weltkarte": [],
+        "pointer_positionen": [],
+    }
+
+
+def poll_thread():
+    """Pollt regelmäßig das Log und aktualisiert Historie."""
     global letztes_ergebnis
 
-    while sim_laeuft:
-        time.sleep(ANALYSE_INTERVALL)
-
-        if welt is None:
+    while True:
+        time.sleep(POLL_INTERVALL)
+        rust = get_latest_data()
+        if not rust:
             continue
 
-        try:
-            with sim_lock:
-                pointer_kopie = list(pointer)
+        daten = rust_zu_dashboard(rust)
+        letztes_ergebnis = daten
 
-            beobachter = Beobachter(welt, pointer_kopie, sim_daten)
-            ergebnis = beobachter.analysiere()
+        historie.append({
+            "tick": daten["tick_nummer"],
+            "zeit": daten["laufzeit_sekunden"],
+            "population": daten["population"],
+            "geburten": daten["geburten_gesamt"],
+            "tode": daten["tode_gesamt"],
+            "diversitaet": daten["diversitaet"],
+            "shannon": daten["diversitaet_shannon"],
+            "genom_laenge_avg": daten["genom_laenge_avg"],
+            "speicher_prozent": daten["speicher_belegt_prozent"],
+            "lesen_extern": daten["lesen_extern_anteil"],
+            "schreiben_extern": daten.get("schreiben_extern_anteil", 0),
+            "nahrung": daten.get("nahrung_anzahl", 0),
+            "lesen_ext_exec": daten.get("ausgefuehrte_lesen_ext_prozent", 0),
+            "schr_ext_exec": daten.get("ausgefuehrte_schr_ext_prozent", 0),
+        })
 
-            laufzeit = time.time() - sim_daten["startzeit"]
-            ergebnis["laufzeit_sekunden"] = round(laufzeit, 1)
-            ergebnis["ticks_pro_sekunde"] = round(
-                ergebnis["tick_nummer"] / max(laufzeit, 0.001), 0
-            )
-
-            # Ausgeführte Ops auslesen und zurücksetzen
-            from beobachter import OPCODE_NAMEN
-            ops_snapshot = list(ausgefuehrte_ops)
-            for i in range(11):
-                ausgefuehrte_ops[i] = 0
-            ergebnis["ausgefuehrte_ops"] = {
-                OPCODE_NAMEN[i]: ops_snapshot[i] for i in range(11)
-            }
-            ausgefuehrte_total = sum(ops_snapshot)
-            ergebnis["ausgefuehrte_ops_total"] = ausgefuehrte_total
-            if ausgefuehrte_total > 0:
-                ergebnis["ausgefuehrte_lesen_ext_prozent"] = round(ops_snapshot[6] / ausgefuehrte_total * 100, 2)
-                ergebnis["ausgefuehrte_schr_ext_prozent"] = round(ops_snapshot[10] / ausgefuehrte_total * 100, 2)
-            else:
-                ergebnis["ausgefuehrte_lesen_ext_prozent"] = 0
-                ergebnis["ausgefuehrte_schr_ext_prozent"] = 0
-
-            letztes_ergebnis = ergebnis
-
-            # Wahrnehmungsanalyse cachen
-            try:
-                wahrnehmung = beobachter.analyse_wahrnehmung()
-                global letztes_analyse_ergebnis
-                letztes_analyse_ergebnis = wahrnehmung
-            except Exception:
-                pass
-
-            # Historie speichern (kompakt)
-            historie.append({
-                "tick": ergebnis["tick_nummer"],
-                "zeit": round(laufzeit, 1),
-                "population": ergebnis["population"],
-                "geburten": ergebnis["geburten_gesamt"],
-                "tode": ergebnis["tode_gesamt"],
-                "diversitaet": ergebnis["diversitaet"],
-                "shannon": ergebnis["diversitaet_shannon"],
-                "genom_laenge_avg": ergebnis["genom_laenge_avg"],
-                "speicher_prozent": ergebnis["speicher_belegt_prozent"],
-                "lesen_extern": ergebnis["lesen_extern_anteil"],
-                "schreiben_extern": ergebnis.get("schreiben_extern_anteil", 0),
-                "nahrung": ergebnis.get("nahrung_anzahl", 0),
-                "lesen_ext_exec": ergebnis.get("ausgefuehrte_lesen_ext_prozent", 0),
-                "schr_ext_exec": ergebnis.get("ausgefuehrte_schr_ext_prozent", 0),
-            })
-
-            # Max 360 Einträge behalten
-            while len(historie) > 900:
-                historie.pop(0)
-
-        except Exception as e:
-            print(f"Analyse-Fehler: {e}")
+        while len(historie) > 900:
+            historie.pop(0)
 
 
 # === HTML Dashboard ===
@@ -568,7 +441,6 @@ function updateGenome(d){
  el.textContent=d.lesen_extern_anteil!==undefined?d.lesen_extern_anteil.toFixed(2)+'%':'—';
 
  // Ausgeführte Ops
- let namen=["NOOP","LESEN","SCHREIBEN","ADDIEREN","VERGL_SPR","KOPIEREN","LESEN_EXT","SELBST","SETZEN","ENDE","SCHR_EXT"];
  let execOps=d.ausgefuehrte_ops||{};
  let maxExecOp=Math.max(1,...Object.values(execOps));
  let execBarsHtml='';
@@ -588,6 +460,7 @@ function updateGenome(d){
  let ops=d.operations_verteilung||{};
  let maxOp=Math.max(1,...Object.values(ops));
  let barsHtml='';
+ let namen=["NOOP","LESEN","SCHREIBEN","ADDIEREN","VERGL_SPR","KOPIEREN","LESEN_EXT","SELBST","SETZEN","ENDE","SCHR_EXT"];
  namen.forEach(name=>{
   let val=ops[name]||0;
   let pct=(val/maxOp*100).toFixed(0);
@@ -746,7 +619,7 @@ async function refresh(){
   }
   if(currentTab==='population')drawCharts();
  }catch(e){
-  document.getElementById('hdr-status').textContent='Fehler: '+e.message;
+  document.getElementById('hdr-status').textContent='Verbindungsfehler';
  }
 }
 
@@ -780,78 +653,51 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = self.path.split("?")[0]
-        query = self.path.split("?")[1] if "?" in self.path else ""
 
         if path == "/":
             self._html_response(DASHBOARD_HTML)
 
         elif path == "/api/status":
-            daten = dict(letztes_ergebnis) if letztes_ergebnis else {}
+            daten = dict(letztes_ergebnis) if letztes_ergebnis else rust_zu_dashboard(get_latest_data())
             daten.pop("weltkarte", None)
             daten.pop("pointer_positionen", None)
-            if letzter_blitz:
-                daten["letzter_blitz"] = letzter_blitz
             self._json_response(daten)
 
         elif path == "/api/weltkarte":
-            karte = letztes_ergebnis.get("weltkarte", [])
-            positionen = letztes_ergebnis.get("pointer_positionen", [])
-            self._json_response({"weltkarte": karte, "pointer_positionen": positionen})
+            self._json_response({"weltkarte": [], "pointer_positionen": []})
 
         elif path == "/api/genome":
+            daten = letztes_ergebnis if letztes_ergebnis else rust_zu_dashboard(get_latest_data())
             self._json_response({
-                "top_genome": letztes_ergebnis.get("top_genome", []),
-                "operations_verteilung": letztes_ergebnis.get("operations_verteilung", {}),
-                "lesen_extern_anteil": letztes_ergebnis.get("lesen_extern_anteil", 0),
+                "top_genome": daten.get("top_genome", []),
+                "operations_verteilung": daten.get("operations_verteilung", {}),
+                "lesen_extern_anteil": daten.get("lesen_extern_anteil", 0),
             })
 
         elif path == "/api/export":
-            daten = dict(letztes_ergebnis) if letztes_ergebnis else {}
+            daten = dict(letztes_ergebnis) if letztes_ergebnis else rust_zu_dashboard(get_latest_data())
             daten.pop("weltkarte", None)
             daten.pop("pointer_positionen", None)
-            if "speicher=1" in query and welt is not None:
-                daten["speicher_base64"] = base64.b64encode(
-                    bytes(welt.speicher)
-                ).decode("ascii")
             self._json_response(daten)
 
         elif path == "/api/history":
             self._json_response(list(historie))
 
         elif path == "/api/analyse":
-            self._json_response(letztes_analyse_ergebnis if letztes_analyse_ergebnis else {"anzahl": 0, "gesamt": 0, "prozent": 0, "top5": [], "meilensteine": []})
+            self._json_response({"anzahl": 0, "gesamt": 0, "prozent": 0, "top5": [], "meilensteine": []})
 
         elif path == "/api/trace":
-            try:
-                with sim_lock:
-                    pointer_kopie = list(pointer)
-                if welt is not None:
-                    beobachter = Beobachter(welt, pointer_kopie, sim_daten)
-                    ergebnis = beobachter.trace_organismen()
-                    self._json_response(ergebnis)
-                else:
-                    self._json_response({"traces": []})
-            except Exception as e:
-                self._json_response({"error": str(e), "traces": []})
+            self._json_response({"traces": []})
 
         elif path == "/api/export_analyse":
-            try:
-                with sim_lock:
-                    pointer_kopie = list(pointer)
-                if welt is not None:
-                    beobachter = Beobachter(welt, pointer_kopie, sim_daten)
-                    ergebnis = beobachter.analyse_wahrnehmung()
-                else:
-                    ergebnis = {"anzahl": 0, "gesamt": 0, "prozent": 0, "top5": [], "meilensteine": []}
-                body = json.dumps(ergebnis, ensure_ascii=False, indent=2).encode("utf-8")
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json; charset=utf-8")
-                self.send_header("Content-Disposition", 'attachment; filename="genesis_analyse.json"')
-                self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
-            except Exception as e:
-                self._json_response({"error": str(e)})
+            ergebnis = {"anzahl": 0, "gesamt": 0, "prozent": 0, "top5": [], "meilensteine": []}
+            body = json.dumps(ergebnis, ensure_ascii=False, indent=2).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Disposition", 'attachment; filename="genesis_analyse.json"')
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
 
         else:
             self.send_response(404)
@@ -859,25 +705,16 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
 
 def main():
-    global sim_laeuft
-
     print("=" * 60)
-    print("  Genesis v3 — Dashboard")
+    print("  Genesis v3 — Dashboard (Rust-Core Anbindung)")
     print("  http://0.0.0.0:8080")
+    print(f"  Liest Daten aus: {LOG_PFAD}")
     print("=" * 60)
     print()
-    print("Simulation startet im Hintergrund...")
 
-    if os.path.exists("meilensteine.json"):
-        os.remove("meilensteine.json")
-
-    # Simulation starten
-    t_sim = threading.Thread(target=simulation_thread, daemon=True)
-    t_sim.start()
-
-    # Analyse starten
-    t_ana = threading.Thread(target=analyse_thread, daemon=True)
-    t_ana.start()
+    # Poll-Thread starten
+    t_poll = threading.Thread(target=poll_thread, daemon=True)
+    t_poll.start()
 
     # HTTP Server
     server = HTTPServer(("0.0.0.0", 8080), DashboardHandler)
@@ -887,10 +724,9 @@ def main():
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        sim_laeuft = False
         server.server_close()
         print()
-        print(f"Gestoppt. Tick: {sim_daten['tick']:,}")
+        print("Dashboard gestoppt.")
 
 
 if __name__ == "__main__":
