@@ -172,7 +172,17 @@ impl Pointer {
                 }
 
                 6 => { // LESEN_EXTERN
-                    let extern_adr = ((zellende as u64).wrapping_add(r[(arg1 % 4) as usize]) as usize) % groesse;
+                    let offset = r[(arg1 % 4) as usize];
+                    let extern_adr = match cfg.grid_dims() {
+                        Some((breite, hoehe)) => {
+                            let xe = zellende % breite;
+                            let ye = zellende / breite;
+                            let dx = (offset as usize) % breite;
+                            let dy = (offset as usize) / breite;
+                            ((ye + dy) % hoehe) * breite + ((xe + dx) % breite)
+                        }
+                        None => ((zellende as u64).wrapping_add(offset) as usize) % groesse,
+                    };
                     let wert = speicher[extern_adr];
                     r[(arg3 % 4) as usize] = wert as u64;
                     if wert == nahrung_wert {
@@ -198,7 +208,17 @@ impl Pointer {
                 }
 
                 10 => { // SCHREIBEN_EXTERN
-                    let extern_adr = ((zellende as u64).wrapping_add(r[(arg3 % 4) as usize]) as usize) % groesse;
+                    let offset = r[(arg3 % 4) as usize];
+                    let extern_adr = match cfg.grid_dims() {
+                        Some((breite, hoehe)) => {
+                            let xe = zellende % breite;
+                            let ye = zellende / breite;
+                            let dx = (offset as usize) % breite;
+                            let dy = (offset as usize) / breite;
+                            ((ye + dy) % hoehe) * breite + ((xe + dx) % breite)
+                        }
+                        None => ((zellende as u64).wrapping_add(offset) as usize) % groesse,
+                    };
                     speicher[extern_adr] = (r[(arg1 % 4) as usize] & 0xFF) as u8;
                     sinnvolle_ops += 1;
                 }
@@ -230,6 +250,16 @@ impl Pointer {
 pub fn abiogenese(welt: &mut Welt, rng: &mut impl Rng) -> usize {
     let g = welt.groesse();
     let adresse = rng.gen_range(0..g);
+    for (i, &byte) in UR_REPLIKATOR.iter().enumerate() {
+        welt.speicher[(adresse + i) % g] = byte;
+    }
+    adresse
+}
+
+/// Platziert den Ur-Replikator in der Mitte des Grids.
+pub fn abiogenese_grid_mitte(welt: &mut Welt, breite: usize, hoehe: usize) -> usize {
+    let g = welt.groesse();
+    let adresse = (hoehe / 2) * breite + (breite / 2);
     for (i, &byte) in UR_REPLIKATOR.iter().enumerate() {
         welt.speicher[(adresse + i) % g] = byte;
     }

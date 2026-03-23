@@ -64,6 +64,9 @@ impl Default for Config {
 impl Config {
     pub fn from_args(args: &[String]) -> Self {
         let mut cfg = Config::default();
+        let mut grid_breite: usize = 1024;
+        let mut grid_hoehe: usize = 1024;
+        let mut use_grid = false;
         let mut i = 1;
         while i < args.len() {
             match args[i].as_str() {
@@ -77,10 +80,31 @@ impl Config {
                 "--blitz-chance" => { i += 1; cfg.blitz_chance = args[i].parse().unwrap(); }
                 "--fress-energie" => { i += 1; cfg.fress_energie = args[i].parse().unwrap(); }
                 "--nahrung-vorfuellung" => { i += 1; cfg.nahrung_vorfuellung = args[i].parse().unwrap(); }
+                "--topologie" => {
+                    i += 1;
+                    if args[i] == "grid" {
+                        use_grid = true;
+                    }
+                }
+                "--grid-breite" => { i += 1; grid_breite = args[i].parse().unwrap(); }
+                "--grid-hoehe" => { i += 1; grid_hoehe = args[i].parse().unwrap(); }
                 _ => { eprintln!("Unbekannter Parameter: {}", args[i]); }
             }
             i += 1;
         }
+        if use_grid {
+            cfg.topologie = Topologie::Grid { breite: grid_breite, hoehe: grid_hoehe };
+            cfg.speicher_groesse = grid_breite * grid_hoehe;
+        }
         cfg
+    }
+
+    /// Gibt (breite, hoehe) zurück falls Grid-Topologie, sonst None.
+    #[inline]
+    pub fn grid_dims(&self) -> Option<(usize, usize)> {
+        match self.topologie {
+            Topologie::Grid { breite, hoehe } => Some((breite, hoehe)),
+            _ => None,
+        }
     }
 }
