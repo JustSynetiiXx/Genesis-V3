@@ -643,7 +643,26 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._json_response(daten)
 
         elif path == "/api/weltkarte":
-            self._json_response(fetch_rust("/api/weltkarte"))
+            raw = fetch_rust("/api/weltkarte")
+            import base64
+            try:
+                speicher = base64.b64decode(raw.get("speicher_base64", ""))
+                block_size = max(len(speicher) // 1024, 1)
+                karte = []
+                for i in range(1024):
+                    block = speicher[i*block_size:(i+1)*block_size]
+                    non_zero = sum(1 for b in block if b != 0)
+                    if non_zero == 0:
+                        karte.append(0)
+                    elif non_zero > block_size * 0.5:
+                        karte.append(2)
+                    else:
+                        karte.append(1)
+                ptrs = raw.get("pointer_positionen", [])
+                ptr_adressen = [p["adresse"] if isinstance(p, dict) else p for p in ptrs]
+                self._json_response({"weltkarte": karte, "pointer_positionen": ptr_adressen})
+            except Exception as e:
+                self._json_response({"weltkarte": [], "pointer_positionen": []})
 
         elif path == "/api/genome":
             daten = letztes_ergebnis if letztes_ergebnis else enrich_data(get_latest_data())
