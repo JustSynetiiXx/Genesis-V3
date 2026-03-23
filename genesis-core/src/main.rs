@@ -13,7 +13,7 @@ use serde_json::json;
 
 use config::Config;
 use http_api::{SimState, berechne_genom_stats, berechne_analyse, berechne_traces, start_http_server};
-use interpreter::{abiogenese, Pointer};
+use interpreter::{abiogenese, abiogenese_grid_mitte, Pointer};
 use welt::Welt;
 
 const OPCODE_NAMEN: [&str; 11] = [
@@ -42,7 +42,10 @@ fn main() {
     welt.vorfuellen(&mut rng);
 
     // Ur-Replikator einsetzen
-    let start_adr = abiogenese(&mut welt, &mut rng);
+    let start_adr = match cfg.grid_dims() {
+        Some((breite, hoehe)) => abiogenese_grid_mitte(&mut welt, breite, hoehe),
+        None => abiogenese(&mut welt, &mut rng),
+    };
     let mut pointer_liste: Vec<Pointer> = vec![Pointer::new(start_adr)];
     let mut belegte_adressen: HashSet<usize> = HashSet::new();
     belegte_adressen.insert(start_adr);
@@ -62,6 +65,10 @@ fn main() {
 
     eprintln!("Genesis v3.1 — Rust Core");
     eprintln!("Speicher: {} Bytes", cfg.speicher_groesse);
+    match cfg.grid_dims() {
+        Some((b, h)) => eprintln!("Topologie: Grid {}x{} (Torus)", b, h),
+        None => eprintln!("Topologie: Linear"),
+    }
     eprintln!("Population-Limit: {}", cfg.population_limit);
     eprintln!("Spawn-Energie: {}", cfg.spawn_energie);
 

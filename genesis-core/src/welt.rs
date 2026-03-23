@@ -40,11 +40,33 @@ impl Welt {
     }
 
     pub fn blitz(&mut self, rng: &mut impl Rng) {
-        let g = self.groesse();
-        let bytes = (g as f32 * self.config.blitz_prozent) as usize;
-        for _ in 0..bytes {
-            let pos = rng.gen_range(0..g);
-            self.speicher[pos] = 0;
+        match self.config.grid_dims() {
+            Some((breite, hoehe)) => {
+                // Rechteckiges Gebiet löschen (~blitz_prozent des Speichers)
+                let g = self.groesse();
+                let target_bytes = (g as f32 * self.config.blitz_prozent) as usize;
+                let seite = (target_bytes as f64).sqrt() as usize;
+                let bx = seite.max(1).min(breite);
+                let by = seite.max(1).min(hoehe);
+                let sx = rng.gen_range(0..breite);
+                let sy = rng.gen_range(0..hoehe);
+                for dy in 0..by {
+                    let y = (sy + dy) % hoehe;
+                    for dx in 0..bx {
+                        let x = (sx + dx) % breite;
+                        self.speicher[y * breite + x] = 0;
+                    }
+                }
+            }
+            None => {
+                // Linear: zufällige Positionen
+                let g = self.groesse();
+                let bytes = (g as f32 * self.config.blitz_prozent) as usize;
+                for _ in 0..bytes {
+                    let pos = rng.gen_range(0..g);
+                    self.speicher[pos] = 0;
+                }
+            }
         }
     }
 
