@@ -1,8 +1,10 @@
 mod config;
+mod http_api;
 mod interpreter;
 mod welt;
 
 use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use rand::rngs::SmallRng;
@@ -10,6 +12,7 @@ use rand::{Rng, SeedableRng};
 use serde_json::json;
 
 use config::Config;
+use http_api::{SimState, berechne_genom_stats, start_http_server};
 use interpreter::{abiogenese, Pointer};
 use welt::Welt;
 
@@ -51,6 +54,11 @@ fn main() {
 
     let startzeit = Instant::now();
     let mut letzte_ausgabe = Instant::now();
+
+    let sim_state = Arc::new(Mutex::new(SimState::new(cfg.speicher_groesse)));
+    start_http_server(Arc::clone(&sim_state));
+
+    let mut population_max: usize = 0;
 
     eprintln!("Genesis v3.1 — Rust Core");
     eprintln!("Speicher: {} Bytes", cfg.speicher_groesse);
@@ -139,12 +147,18 @@ fn main() {
             let nahrung = welt.nahrung_zaehlen();
             let belegt = welt.belegt_zaehlen();
             let pop = pointer_liste.len();
+            if pop > population_max {
+                population_max = pop;
+            }
 
-            // Genomlängen
-            let mut laengen: Vec<usize> = pointer_liste.iter()
-                .filter(|p| p.aktiv)
-                .map(|p| genom_laenge(speicher, p.startadresse, g, max_zell))
-                .collect();
+            // Genomlängen + Pointer-Positionen
+            let mut laengen: Vec<usize> = Vec::with_capacity(pop);
+            let mut ptr_positionen: Vec<(usize, usize)> = Vec::with_capacity(pop);
+            for p in pointer_liste.iter().filter(|p| p.aktiv) {
+                let gl = genom_laenge(speicher, p.startadresse, g, max_zell);
+                laengen.push(gl);
+                ptr_positionen.push((p.startadresse, gl));
+            }
             if laengen.is_empty() {
                 laengen.push(0);
             }
@@ -157,6 +171,38 @@ fn main() {
             ops_zaehler = [0; 11];
             let ops_total: u64 = ops_snapshot.iter().sum();
 
+            // Genom-Statistiken
+            let (top_genome, diversitaet, shannon, ops_verteilung) =
+                berechne_genom_stats(speicher, &ptr_positionen, g);
+
+            // SimState updaten
+            {
+                let mut s = sim_state.lock().unwrap();
+                s.tick = tick;
+                s.population = pop;
+                s.population_max = population_max;
+                s.geburten_gesamt = geburten_gesamt;
+                s.tode_gesamt = tode_gesamt;
+                s.speicher_belegt_bytes = belegt;
+                s.speicher_belegt_prozent = (belegt as f64 / g as f64 * 100.0 * 100.0).round() / 100.0;
+                s.diversitaet = diversitaet;
+                s.diversitaet_shannon = shannon;
+                s.genom_laenge_avg = (avg * 10.0).round() / 10.0;
+                s.genom_laenge_min = min_l;
+                s.genom_laenge_max = max_l;
+                s.nahrung_anzahl = nahrung;
+                s.nahrung_prozent = (nahrung as f64 / g as f64 * 100.0 * 100.0).round() / 100.0;
+                s.ticks_pro_sekunde = (tps * 10.0).round() / 10.0;
+                s.laufzeit_sekunden = (elapsed * 10.0).round() / 10.0;
+                s.ausgefuehrte_ops = ops_snapshot;
+                s.ausgefuehrte_ops_total = ops_total;
+                s.top_genome = top_genome;
+                s.operations_verteilung = ops_verteilung;
+                s.speicher_snapshot.copy_from_slice(speicher);
+                s.pointer_positionen = ptr_positionen;
+            }
+
+            // stdout JSON (bestehendes Format beibehalten)
             let mut ops_map = serde_json::Map::new();
             for (i, name) in OPCODE_NAMEN.iter().enumerate() {
                 ops_map.insert(name.to_string(), json!(ops_snapshot[i]));
