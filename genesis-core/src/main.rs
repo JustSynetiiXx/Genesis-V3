@@ -13,7 +13,7 @@ use serde_json::json;
 
 use config::Config;
 use http_api::{SimState, berechne_genom_stats, berechne_analyse, berechne_traces, start_http_server};
-use interpreter::{abiogenese, abiogenese_grid_mitte, Pointer};
+use interpreter::{abiogenese, abiogenese_grid_mitte, abiogenese_near_oase, Pointer};
 use welt::Welt;
 
 const OPCODE_NAMEN: [&str; 11] = [
@@ -42,9 +42,12 @@ fn main() {
     welt.vorfuellen(&mut rng);
 
     // Ur-Replikator einsetzen
-    let start_adr = match cfg.grid_dims() {
-        Some((breite, hoehe)) => abiogenese_grid_mitte(&mut welt, breite, hoehe),
-        None => abiogenese(&mut welt, &mut rng),
+    let start_adr = match (cfg.grid_dims(), cfg.oasen()) {
+        (Some((breite, hoehe)), Some(oasen)) => {
+            abiogenese_near_oase(&mut welt, &mut rng, oasen, breite, hoehe)
+        }
+        (Some((breite, hoehe)), None) => abiogenese_grid_mitte(&mut welt, breite, hoehe),
+        _ => abiogenese(&mut welt, &mut rng),
     };
     let mut pointer_liste: Vec<Pointer> = vec![Pointer::new(start_adr)];
     let mut belegte_adressen: HashSet<usize> = HashSet::new();
@@ -68,6 +71,10 @@ fn main() {
     match cfg.grid_dims() {
         Some((b, h)) => eprintln!("Topologie: Grid {}x{} (Torus)", b, h),
         None => eprintln!("Topologie: Linear"),
+    }
+    match cfg.oasen() {
+        Some(oasen) => eprintln!("Nahrung: Gradient mit {} Oasen", oasen.len()),
+        None => eprintln!("Nahrung: Gleichverteilt"),
     }
     eprintln!("Population-Limit: {}", cfg.population_limit);
     eprintln!("Spawn-Energie: {}", cfg.spawn_energie);
