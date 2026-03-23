@@ -661,10 +661,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._json_response(list(historie))
 
         elif path == "/api/analyse":
-            self._json_response({"anzahl": 0, "gesamt": 0, "prozent": 0, "top5": [], "meilensteine": []})
+            self._json_response(fetch_rust("/api/analyse"))
 
         elif path == "/api/trace":
-            self._json_response({"traces": []})
+            self._json_response(fetch_rust("/api/trace"))
 
         elif path == "/api/export_analyse":
             ergebnis = {"anzahl": 0, "gesamt": 0, "prozent": 0, "top5": [], "meilensteine": []}

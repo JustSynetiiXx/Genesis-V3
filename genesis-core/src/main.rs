@@ -12,7 +12,7 @@ use rand::{Rng, SeedableRng};
 use serde_json::json;
 
 use config::Config;
-use http_api::{SimState, berechne_genom_stats, start_http_server};
+use http_api::{SimState, berechne_genom_stats, berechne_analyse, berechne_traces, start_http_server};
 use interpreter::{abiogenese, Pointer};
 use welt::Welt;
 
@@ -175,6 +175,13 @@ fn main() {
             let (top_genome, diversitaet, shannon, ops_verteilung) =
                 berechne_genom_stats(speicher, &ptr_positionen, g);
 
+            // Wahrnehmungs-Analyse + Traces
+            let analyse = berechne_analyse(speicher, &ptr_positionen, g);
+            let traces = berechne_traces(
+                speicher, &ptr_positionen, g,
+                cfg.spawn_energie, cfg.fress_energie, cfg.nahrung_wert,
+            );
+
             // SimState updaten
             {
                 let mut s = sim_state.lock().unwrap();
@@ -200,6 +207,8 @@ fn main() {
                 s.operations_verteilung = ops_verteilung;
                 s.speicher_snapshot.copy_from_slice(speicher);
                 s.pointer_positionen = ptr_positionen;
+                s.analyse_ergebnis = analyse;
+                s.trace_ergebnis = traces;
             }
 
             // stdout JSON (bestehendes Format beibehalten)

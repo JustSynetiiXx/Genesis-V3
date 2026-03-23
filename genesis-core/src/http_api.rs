@@ -40,6 +40,10 @@ pub struct SimState {
     // Weltkarte
     pub speicher_snapshot: Vec<u8>,
     pub pointer_positionen: Vec<(usize, usize)>, // (adresse, laenge)
+
+    // Analyse
+    pub analyse_ergebnis: serde_json::Value,
+    pub trace_ergebnis: serde_json::Value,
 }
 
 #[derive(Clone)]
@@ -75,6 +79,8 @@ impl SimState {
             operations_verteilung: [0; 11],
             speicher_snapshot: vec![0u8; speicher_groesse],
             pointer_positionen: Vec::new(),
+            analyse_ergebnis: json!({"anzahl": 0, "gesamt": 0, "prozent": 0.0, "top5": [], "meilensteine": []}),
+            trace_ergebnis: json!({"traces": []}),
         }
     }
 }
@@ -208,6 +214,18 @@ pub fn start_http_server(state: Arc<Mutex<SimState>>) {
                     drop(s);
                     let _ = request.respond(json_response(data));
                 }
+                "/api/analyse" => {
+                    let s = state.lock().unwrap();
+                    let data = s.analyse_ergebnis.clone();
+                    drop(s);
+                    let _ = request.respond(json_response(data));
+                }
+                "/api/trace" => {
+                    let s = state.lock().unwrap();
+                    let data = s.trace_ergebnis.clone();
+                    drop(s);
+                    let _ = request.respond(json_response(data));
+                }
                 _ => {
                     let resp = Response::from_string("Not Found")
                         .with_status_code(404);
@@ -297,4 +315,282 @@ pub fn berechne_genom_stats(
     }).collect();
 
     (top_genome, diversitaet, shannon, ops_verteilung)
+}
+
+/// Prüft ob ein Organismus ein Wahrnehmungs-Muster hat.
+/// LESEN_EXTERN (6) gefolgt innerhalb von 3 Anweisungen von VERGL_SPR (4) oder SCHR_EXT (10).
+fn hat_wahrnehmungs_muster(genom: &[u8]) -> bool {
+    let n_instr = genom.len() / 4;
+    for i in 0..n_instr {
+        if genom[i * 4] == 6 {
+            // Prüfe die nächsten 3 Anweisungen
+            for j in 1..=3 {
+                let idx = i + j;
+                if idx >= n_instr {
+                    break;
+                }
+                let op = genom[idx * 4];
+                if op == 4 || op == 10 {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Berechnet Wahrnehmungs-Analyse für alle Pointer.
+pub fn berechne_analyse(
+    speicher: &[u8],
+    pointer_positionen: &[(usize, usize)], // (startadresse, genom_laenge)
+    groesse: usize,
+) -> serde_json::Value {
+    let gesamt = pointer_positionen.len();
+    let mut mit_muster: Vec<(usize, usize, Vec<u8>)> = Vec::new(); // (adresse, laenge, bytes)
+
+    for &(start, laenge) in pointer_positionen {
+        let len = laenge.min(1024);
+        let mut bytes = Vec::with_capacity(len);
+        for i in 0..len {
+            bytes.push(speicher[(start + i) % groesse]);
+        }
+        if hat_wahrnehmungs_muster(&bytes) {
+            mit_muster.push((start, len, bytes));
+        }
+    }
+
+    let anzahl = mit_muster.len();
+    let prozent = if gesamt > 0 {
+        ((anzahl as f64 / gesamt as f64) * 10000.0).round() / 100.0
+    } else {
+        0.0
+    };
+
+    let top5: Vec<serde_json::Value> = mit_muster.iter().take(5).map(|(adr, len, bytes)| {
+        let hex: Vec<String> = bytes.iter().take(32).map(|b| format!("{:02X}", b)).collect();
+        json!({
+            "adresse": adr,
+            "genom_laenge": len,
+            "code_ausschnitt": hex.join(" "),
+        })
+    }).collect();
+
+    json!({
+        "anzahl": anzahl,
+        "gesamt": gesamt,
+        "prozent": prozent,
+        "top5": top5,
+        "meilensteine": [],
+    })
+}
+
+fn opcode_name(op: u8) -> String {
+    if (op as usize) < OPCODE_NAMEN.len() {
+        OPCODE_NAMEN[op as usize].to_string()
+    } else {
+        format!("?({op})")
+    }
+}
+
+/// Simuliert bis zu 50 Schritte read-only für einen Organismus.
+fn trace_organismus(
+    speicher: &[u8],
+    startadresse: usize,
+    genom_laenge: usize,
+    groesse: usize,
+    spawn_energie: i32,
+    fress_energie: i32,
+    nahrung_wert: u8,
+) -> serde_json::Value {
+    let mut r: [u64; 4] = [0; 4];
+    let mut adresse = startadresse;
+    let mut energie = spawn_energie;
+
+    // Zellende berechnen
+    let max_zell = genom_laenge.min(1024);
+    let mut zellende = startadresse;
+    let mut found_ende = false;
+    for i in (0..max_zell).step_by(4) {
+        let pos = (startadresse + i) % groesse;
+        if speicher[pos] == 9 {
+            zellende = (startadresse + i + 4) % groesse;
+            found_ende = true;
+            break;
+        }
+    }
+    if !found_ende {
+        zellende = (startadresse + max_zell) % groesse;
+    }
+
+    let mut schritte: Vec<serde_json::Value> = Vec::new();
+
+    for schritt_nr in 1..=50 {
+        if energie <= 0 || adresse >= groesse {
+            break;
+        }
+        energie -= 1;
+
+        let adr = adresse % groesse;
+        let befehl = speicher[adr];
+        let arg1 = speicher[(adr + 1) % groesse];
+        let arg2 = speicher[(adr + 2) % groesse];
+        let arg3 = speicher[(adr + 3) % groesse];
+
+        let ist_lesen_extern = befehl == 6;
+        let ist_vergleichen_springen = befehl == 4;
+        let mut details = String::new();
+
+        match befehl {
+            0 => { /* NOOP */ }
+
+            1 => { // LESEN
+                let quell_adr = (r[(arg1 % 4) as usize] as usize) % groesse;
+                r[(arg3 % 4) as usize] = speicher[quell_adr] as u64;
+                details = format!("Gelesen: {} von Adresse {}", speicher[quell_adr], quell_adr);
+            }
+
+            2 => { // SCHREIBEN — read-only, nicht ausführen
+                let ziel = (r[(arg3 % 4) as usize] as usize) % groesse;
+                let wert = r[(arg1 % 4) as usize] & 0xFF;
+                details = format!("Schreiben: {} nach Adresse {} (simuliert)", wert, ziel);
+            }
+
+            3 => { // ADDIEREN
+                r[(arg3 % 4) as usize] = r[(arg1 % 4) as usize].wrapping_add(r[(arg2 % 4) as usize]);
+                details = format!("R{} = R{} + R{} = {}",
+                    arg3 % 4, arg1 % 4, arg2 % 4, r[(arg3 % 4) as usize]);
+            }
+
+            4 => { // VERGLEICHEN_SPRINGEN
+                if r[(arg1 % 4) as usize] != r[(arg2 % 4) as usize] {
+                    let sprung = if arg3 < 128 { arg3 as i32 } else { arg3 as i32 - 256 };
+                    let new_addr = adresse as i64 + (sprung as i64) * 4;
+                    details = format!("R{}({}) != R{}({}) → Sprung {}",
+                        arg1 % 4, r[(arg1 % 4) as usize],
+                        arg2 % 4, r[(arg2 % 4) as usize], sprung * 4);
+                    schritte.push(json!({
+                        "schritt": schritt_nr,
+                        "operation": opcode_name(befehl),
+                        "register_nachher": [r[0], r[1], r[2], r[3]],
+                        "details": details,
+                        "ist_lesen_extern": ist_lesen_extern,
+                        "ist_vergleichen_springen": ist_vergleichen_springen,
+                    }));
+                    if new_addr < 0 || new_addr >= groesse as i64 {
+                        break;
+                    }
+                    adresse = new_addr as usize;
+                    continue;
+                } else {
+                    details = format!("R{}({}) == R{}({}) → kein Sprung",
+                        arg1 % 4, r[(arg1 % 4) as usize],
+                        arg2 % 4, r[(arg2 % 4) as usize]);
+                }
+            }
+
+            5 => { // KOPIEREN — read-only, nicht ausführen
+                let anzahl = std::cmp::min(r[(arg1 % 4) as usize] as usize, 1024);
+                let quelle = r[(arg2 % 4) as usize];
+                let ziel_adr = r[(arg3 % 4) as usize];
+                details = format!("Kopieren: {} Bytes von {} nach {} (simuliert)",
+                    anzahl, quelle, ziel_adr);
+            }
+
+            6 => { // LESEN_EXTERN
+                let extern_adr = ((zellende as u64).wrapping_add(r[(arg1 % 4) as usize]) as usize) % groesse;
+                let wert = speicher[extern_adr];
+                r[(arg3 % 4) as usize] = wert as u64;
+                if wert == nahrung_wert {
+                    energie += fress_energie; // Simuliert, Nahrung bleibt
+                }
+                details = format!("Extern gelesen: {} von Adresse {}", wert, extern_adr);
+            }
+
+            7 => { // SELBST
+                r[(arg3 % 4) as usize] = startadresse as u64;
+                details = format!("Startadresse {} → R{}", startadresse, arg3 % 4);
+            }
+
+            8 => { // SETZEN
+                r[(arg3 % 4) as usize] = arg1 as u64;
+                details = format!("{} → R{}", arg1, arg3 % 4);
+            }
+
+            9 => { // ENDE
+                details = "Programm beendet".to_string();
+                schritte.push(json!({
+                    "schritt": schritt_nr,
+                    "operation": opcode_name(befehl),
+                    "register_nachher": [r[0], r[1], r[2], r[3]],
+                    "details": details,
+                    "ist_lesen_extern": ist_lesen_extern,
+                    "ist_vergleichen_springen": ist_vergleichen_springen,
+                }));
+                break;
+            }
+
+            10 => { // SCHREIBEN_EXTERN — read-only
+                let extern_adr = ((zellende as u64).wrapping_add(r[(arg3 % 4) as usize]) as usize) % groesse;
+                let wert = r[(arg1 % 4) as usize] & 0xFF;
+                details = format!("Extern schreiben: {} nach Adresse {} (simuliert)", wert, extern_adr);
+            }
+
+            _ => {
+                details = format!("Unbekannter Opcode {}", befehl);
+            }
+        }
+
+        schritte.push(json!({
+            "schritt": schritt_nr,
+            "operation": opcode_name(befehl),
+            "register_nachher": [r[0], r[1], r[2], r[3]],
+            "details": details,
+            "ist_lesen_extern": ist_lesen_extern,
+            "ist_vergleichen_springen": ist_vergleichen_springen,
+        }));
+
+        adresse += 4;
+        if adresse >= groesse {
+            break;
+        }
+    }
+
+    json!({
+        "adresse": startadresse,
+        "genom_laenge": genom_laenge,
+        "schritte": schritte,
+    })
+}
+
+/// Berechnet Traces für bis zu 3 Organismen mit Wahrnehmungs-Muster.
+pub fn berechne_traces(
+    speicher: &[u8],
+    pointer_positionen: &[(usize, usize)],
+    groesse: usize,
+    spawn_energie: i32,
+    fress_energie: i32,
+    nahrung_wert: u8,
+) -> serde_json::Value {
+    let mut traces: Vec<serde_json::Value> = Vec::new();
+    let mut gefunden = 0;
+
+    for &(start, laenge) in pointer_positionen {
+        if gefunden >= 3 {
+            break;
+        }
+        let len = laenge.min(1024);
+        let mut bytes = Vec::with_capacity(len);
+        for i in 0..len {
+            bytes.push(speicher[(start + i) % groesse]);
+        }
+        if hat_wahrnehmungs_muster(&bytes) {
+            traces.push(trace_organismus(
+                speicher, start, laenge, groesse,
+                spawn_energie, fress_energie, nahrung_wert,
+            ));
+            gefunden += 1;
+        }
+    }
+
+    json!({"traces": traces})
 }
