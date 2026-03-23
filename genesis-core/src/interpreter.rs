@@ -107,14 +107,9 @@ impl Pointer {
             match befehl {
                 0 => { /* NOOP */ }
 
-                1 => { // LESEN
+                1 => { // LESEN — frisst NICHT
                     let quell_adr = (r[(arg1 % 4) as usize] as usize) % groesse;
-                    let wert = speicher[quell_adr];
-                    r[(arg3 % 4) as usize] = wert as u64;
-                    if wert == nahrung_wert {
-                        energie += fress_energie;
-                        speicher[quell_adr] = 0;
-                    }
+                    r[(arg3 % 4) as usize] = speicher[quell_adr] as u64;
                     sinnvolle_ops += 1;
                 }
 
@@ -155,7 +150,7 @@ impl Pointer {
                     energie -= kopier_kosten;
                     for i in 0..anzahl {
                         let ziel_pos = ((ziel_adr as usize) + i) % groesse;
-                        if speicher[ziel_pos] != 0 {
+                        if speicher[ziel_pos] != 0 && speicher[ziel_pos] != 42 {
                             continue;
                         }
                         let quell_pos = ((quelle as usize) + i) % groesse;
