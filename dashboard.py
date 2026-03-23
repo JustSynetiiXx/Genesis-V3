@@ -422,6 +422,7 @@ function updateGenome(d){
  // Ausgeführte Ops
  let execOps=d.ausgefuehrte_ops||{};
  let maxExecOp=Math.max(1,...Object.values(execOps));
+ let namen=["NOOP","LESEN","SCHREIBEN","ADDIEREN","VERGL_SPR","KOPIEREN","LESEN_EXT","SELBST","SETZEN","ENDE","SCHR_EXT"];
  let execBarsHtml='';
  namen.forEach(name=>{
   let val=execOps[name]||0;
@@ -439,7 +440,6 @@ function updateGenome(d){
  let ops=d.operations_verteilung||{};
  let maxOp=Math.max(1,...Object.values(ops));
  let barsHtml='';
- let namen=["NOOP","LESEN","SCHREIBEN","ADDIEREN","VERGL_SPR","KOPIEREN","LESEN_EXT","SELBST","SETZEN","ENDE","SCHR_EXT"];
  namen.forEach(name=>{
   let val=ops[name]||0;
   let pct=(val/maxOp*100).toFixed(0);
@@ -577,7 +577,7 @@ function updateAnalyse(d){
 async function refresh(){
  try{
   let fetches=[
-   fetch('/api/status'),
+   fetch('/api/export'),
    fetch('/api/history'),
    fetch('/api/analyse')
   ];
