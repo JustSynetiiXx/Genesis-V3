@@ -265,3 +265,25 @@ pub fn abiogenese_grid_mitte(welt: &mut Welt, breite: usize, hoehe: usize) -> us
     }
     adresse
 }
+
+/// Platziert den Ur-Replikator in der Nähe einer zufälligen Oase.
+pub fn abiogenese_near_oase(
+    welt: &mut Welt,
+    rng: &mut impl Rng,
+    oasen: &[(usize, usize, f32)],
+    breite: usize,
+    hoehe: usize,
+) -> usize {
+    let g = welt.groesse();
+    let radius = breite / 12; // radius/2 von breite/6
+    let (ox, oy, _) = oasen[rng.gen_range(0..oasen.len())];
+    let dx = rng.gen_range(0..radius * 2).wrapping_sub(radius);
+    let dy = rng.gen_range(0..radius * 2).wrapping_sub(radius);
+    let x = (ox as isize + dx as isize).rem_euclid(breite as isize) as usize;
+    let y = (oy as isize + dy as isize).rem_euclid(hoehe as isize) as usize;
+    let adresse = y * breite + x;
+    for (i, &byte) in UR_REPLIKATOR.iter().enumerate() {
+        welt.speicher[(adresse + i) % g] = byte;
+    }
+    adresse
+}

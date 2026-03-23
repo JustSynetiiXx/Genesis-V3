@@ -67,6 +67,8 @@ impl Config {
         let mut grid_breite: usize = 1024;
         let mut grid_hoehe: usize = 1024;
         let mut use_grid = false;
+        let mut use_gradient = false;
+        let mut custom_oasen: Option<Vec<(usize, usize, f32)>> = None;
         let mut i = 1;
         while i < args.len() {
             match args[i].as_str() {
@@ -88,6 +90,28 @@ impl Config {
                 }
                 "--grid-breite" => { i += 1; grid_breite = args[i].parse().unwrap(); }
                 "--grid-hoehe" => { i += 1; grid_hoehe = args[i].parse().unwrap(); }
+                "--nahrung" => {
+                    i += 1;
+                    if args[i] == "gradient" {
+                        use_gradient = true;
+                    }
+                }
+                "--oasen" => {
+                    i += 1;
+                    // Format: "x,y,staerke;x,y,staerke;..."
+                    let mut oasen = Vec::new();
+                    for teil in args[i].split(';') {
+                        let p: Vec<&str> = teil.split(',').collect();
+                        if p.len() == 3 {
+                            oasen.push((
+                                p[0].parse().unwrap(),
+                                p[1].parse().unwrap(),
+                                p[2].parse().unwrap(),
+                            ));
+                        }
+                    }
+                    custom_oasen = Some(oasen);
+                }
                 _ => { eprintln!("Unbekannter Parameter: {}", args[i]); }
             }
             i += 1;
@@ -95,6 +119,18 @@ impl Config {
         if use_grid {
             cfg.topologie = Topologie::Grid { breite: grid_breite, hoehe: grid_hoehe };
             cfg.speicher_groesse = grid_breite * grid_hoehe;
+
+            if use_gradient {
+                let zentren = custom_oasen.unwrap_or_else(|| vec![
+                    (grid_breite / 4, grid_hoehe / 4, 3.0),
+                    (grid_breite * 3 / 4, grid_hoehe / 4, 3.0),
+                    (grid_breite / 4, grid_hoehe * 3 / 4, 3.0),
+                    (grid_breite * 3 / 4, grid_hoehe * 3 / 4, 3.0),
+                ]);
+                cfg.nahrung_modus = NahrungModus::Gradient { zentren };
+            }
+        } else if use_gradient {
+            eprintln!("WARNUNG: --nahrung gradient wird bei linearer Topologie ignoriert. Verwende --topologie grid.");
         }
         cfg
     }
@@ -104,6 +140,14 @@ impl Config {
     pub fn grid_dims(&self) -> Option<(usize, usize)> {
         match self.topologie {
             Topologie::Grid { breite, hoehe } => Some((breite, hoehe)),
+            _ => None,
+        }
+    }
+
+    /// Gibt die Oasen-Zentren zurück falls Gradient-Modus, sonst None.
+    pub fn oasen(&self) -> Option<&Vec<(usize, usize, f32)>> {
+        match &self.nahrung_modus {
+            NahrungModus::Gradient { zentren } => Some(zentren),
             _ => None,
         }
     }
