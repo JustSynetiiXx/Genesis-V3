@@ -34,6 +34,7 @@ pub struct Pointer {
     pub neue_pointer: Vec<usize>,
     pub mutationen: Vec<(usize, u64, u64, u8, u8)>,
     pub kopier_events: usize,
+    pub kopierbereit: bool,
 }
 
 impl Pointer {
@@ -49,6 +50,7 @@ impl Pointer {
             neue_pointer: Vec::new(),
             mutationen: Vec::new(),
             kopier_events: 0,
+            kopierbereit: false,
         }
     }
 
@@ -61,11 +63,14 @@ impl Pointer {
         let mutationsrate = cfg.mutationsrate;
         let fress_energie = cfg.fress_energie;
         let nahrung_wert = cfg.nahrung_wert;
+        let nahrung_wert_b = cfg.nahrung_wert_b;
+        let kopieren_braucht_b = cfg.kopieren_braucht_b;
 
         let startadresse = self.startadresse;
         let mut adresse = self.adresse;
         let r = &mut self.register;
         let mut energie: i32 = spawn_energie;
+        let mut kopierbereit = self.kopierbereit;
         let mut sinnvolle_ops: usize = 0;
         let mut schritte: usize = 0;
         let mut aktiv = true;
@@ -139,6 +144,14 @@ impl Pointer {
                 }
 
                 5 => { // KOPIEREN
+                    sinnvolle_ops += 1;
+                    // Gate: kopierbereit muss gesetzt sein (wenn Typ B aktiv)
+                    if kopieren_braucht_b && !kopierbereit {
+                        // Versuch kostet 1 Energie (bereits abgezogen)
+                        adresse += 4;
+                        if adresse >= groesse { aktiv = false; break; }
+                        continue;
+                    }
                     let mut anzahl = std::cmp::min(r[(arg1 % 4) as usize] as usize, 1024);
                     let quelle = r[(arg2 % 4) as usize];
                     let ziel_adr = r[(arg3 % 4) as usize];
@@ -150,7 +163,7 @@ impl Pointer {
                     energie -= kopier_kosten;
                     for i in 0..anzahl {
                         let ziel_pos = ((ziel_adr as usize) + i) % groesse;
-                        if speicher[ziel_pos] != 0 && speicher[ziel_pos] != 42 {
+                        if speicher[ziel_pos] != 0 && speicher[ziel_pos] != nahrung_wert && speicher[ziel_pos] != nahrung_wert_b {
                             continue;
                         }
                         let quell_pos = ((quelle as usize) + i) % groesse;
@@ -167,8 +180,10 @@ impl Pointer {
                     if anzahl >= cfg.min_kopier_groesse {
                         neue_pointer.push((ziel_adr as usize) % groesse);
                         kopier_events += 1;
+                        if kopieren_braucht_b {
+                            kopierbereit = false;
+                        }
                     }
-                    sinnvolle_ops += 1;
                 }
 
                 6 => { // LESEN_EXTERN
@@ -188,6 +203,10 @@ impl Pointer {
                     if wert == nahrung_wert {
                         energie += fress_energie;
                         speicher[extern_adr] = 0;
+                    } else if wert == nahrung_wert_b {
+                        energie += fress_energie;
+                        speicher[extern_adr] = 0;
+                        kopierbereit = true;
                     }
                     sinnvolle_ops += 1;
                 }
@@ -238,6 +257,7 @@ impl Pointer {
         self.aktiv = aktiv;
         self.energie = energie;
         self.kopier_events = kopier_events;
+        self.kopierbereit = kopierbereit;
         if sinnvolle_ops == 0 {
             self.leerlauf_ticks += 1;
         } else {

@@ -76,6 +76,11 @@ fn main() {
         Some(oasen) => eprintln!("Nahrung: Gradient mit {} Oasen", oasen.len()),
         None => eprintln!("Nahrung: Gleichverteilt"),
     }
+    if cfg.kopieren_braucht_b {
+        eprintln!("Typ B: Aktiv ({}% Anteil, Wert={})", (cfg.nahrung_b_anteil * 100.0) as u32, cfg.nahrung_wert_b);
+    } else {
+        eprintln!("Typ B: Deaktiviert (--kein-typ-b)");
+    }
     eprintln!("Population-Limit: {}", cfg.population_limit);
     eprintln!("Spawn-Energie: {}", cfg.spawn_energie);
 
@@ -159,11 +164,19 @@ fn main() {
             let speicher = &welt.speicher;
 
             let nahrung = welt.nahrung_zaehlen();
+            let nahrung_a = welt.nahrung_a_zaehlen();
+            let nahrung_b = welt.nahrung_b_zaehlen();
             let belegt = welt.belegt_zaehlen();
             let pop = pointer_liste.len();
             if pop > population_max {
                 population_max = pop;
             }
+
+            // kopierbereit-Statistik
+            let kopierbereit_count = pointer_liste.iter().filter(|p| p.aktiv && p.kopierbereit).count();
+            let kopierbereit_pct = if pop > 0 {
+                ((kopierbereit_count as f64 / pop as f64) * 10000.0).round() / 100.0
+            } else { 0.0 };
 
             // Genomlängen + Pointer-Positionen
             let mut laengen: Vec<usize> = Vec::with_capacity(pop);
@@ -212,7 +225,10 @@ fn main() {
                 s.genom_laenge_min = min_l;
                 s.genom_laenge_max = max_l;
                 s.nahrung_anzahl = nahrung;
+                s.nahrung_a_anzahl = nahrung_a;
+                s.nahrung_b_anzahl = nahrung_b;
                 s.nahrung_prozent = (nahrung as f64 / g as f64 * 100.0 * 100.0).round() / 100.0;
+                s.kopierbereit_prozent = kopierbereit_pct;
                 s.ticks_pro_sekunde = (tps * 10.0).round() / 10.0;
                 s.laufzeit_sekunden = (elapsed * 10.0).round() / 10.0;
                 s.ausgefuehrte_ops = ops_snapshot;

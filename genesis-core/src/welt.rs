@@ -29,10 +29,40 @@ impl Welt {
         self.config.speicher_groesse
     }
 
+    /// Wählt Typ A oder Typ B basierend auf Oasen-Nähe.
+    /// Nahe Oase: 80% A / 20% B. Fern: 40% A / 60% B.
+    #[inline]
+    fn waehle_nahrung_typ(&self, oasen_summe: f32, rng: &mut impl Rng) -> u8 {
+        if !self.config.kopieren_braucht_b {
+            return self.config.nahrung_wert;
+        }
+        // oasen_summe hoch → nahe Oase → weniger B
+        // typ_b_chance: nahe Oase (summe>=1) → 0.2, fern (summe~0) → 0.6
+        let naehe = oasen_summe.min(1.0);
+        let typ_b_chance = 0.6 - 0.4 * naehe;
+        if rng.gen::<f32>() < typ_b_chance {
+            self.config.nahrung_wert_b
+        } else {
+            self.config.nahrung_wert
+        }
+    }
+
+    /// Wählt Typ A oder Typ B gleichverteilt (kein Gradient).
+    #[inline]
+    fn waehle_nahrung_typ_gleich(&self, rng: &mut impl Rng) -> u8 {
+        if !self.config.kopieren_braucht_b {
+            return self.config.nahrung_wert;
+        }
+        if rng.gen::<f32>() < self.config.nahrung_b_anteil {
+            self.config.nahrung_wert_b
+        } else {
+            self.config.nahrung_wert
+        }
+    }
+
     pub fn nahrung_streuen(&mut self, rng: &mut impl Rng) {
         match (&self.config.nahrung_modus, self.config.grid_dims()) {
             (NahrungModus::Gradient { zentren }, Some((breite, hoehe))) => {
-                let wert = self.config.nahrung_wert;
                 let radius_sq = {
                     let r = breite as f32 / 6.0;
                     2.0 * r * r
@@ -51,13 +81,12 @@ impl Welt {
                         let mut summe = 0.0f32;
                         for &(ox, oy, staerke) in zentren.iter() {
                             let d_sq = torus_distanz_sq(x, y, ox, oy, breite, hoehe);
-                            // Approximation: 1.0 / (1.0 + d²/(2r²))
                             summe += staerke / (1.0 + d_sq / radius_sq);
                         }
                         let gewicht = (0.3 + summe).min(1.0);
 
                         if rng.gen::<f32>() < gewicht {
-                            self.speicher[pos] = wert;
+                            self.speicher[pos] = self.waehle_nahrung_typ(summe, rng);
                             break;
                         }
                     }
@@ -66,11 +95,10 @@ impl Welt {
             _ => {
                 // Gleichverteilt (oder Linear)
                 let g = self.groesse();
-                let wert = self.config.nahrung_wert;
                 for _ in 0..self.config.nahrung_pro_tick {
                     let pos = rng.gen_range(0..g);
                     if self.speicher[pos] == 0 {
-                        self.speicher[pos] = wert;
+                        self.speicher[pos] = self.waehle_nahrung_typ_gleich(rng);
                     }
                 }
             }
@@ -119,7 +147,6 @@ impl Welt {
     pub fn vorfuellen(&mut self, rng: &mut impl Rng) {
         match (&self.config.nahrung_modus, self.config.grid_dims()) {
             (NahrungModus::Gradient { zentren }, Some((breite, hoehe))) => {
-                let wert = self.config.nahrung_wert;
                 let g = self.groesse();
                 let anzahl = (g as f32 * self.config.nahrung_vorfuellung) as usize;
                 let radius_sq = {
@@ -142,7 +169,7 @@ impl Welt {
                         }
                         let gewicht = (0.3 + summe).min(1.0);
                         if rng.gen::<f32>() < gewicht {
-                            self.speicher[pos] = wert;
+                            self.speicher[pos] = self.waehle_nahrung_typ(summe, rng);
                             break;
                         }
                     }
@@ -150,12 +177,11 @@ impl Welt {
             }
             _ => {
                 let g = self.groesse();
-                let wert = self.config.nahrung_wert;
                 let anzahl = (g as f32 * self.config.nahrung_vorfuellung) as usize;
                 for _ in 0..anzahl {
                     let pos = rng.gen_range(0..g);
                     if self.speicher[pos] == 0 {
-                        self.speicher[pos] = wert;
+                        self.speicher[pos] = self.waehle_nahrung_typ_gleich(rng);
                     }
                 }
             }
@@ -163,7 +189,17 @@ impl Welt {
     }
 
     pub fn nahrung_zaehlen(&self) -> usize {
-        self.speicher.iter().filter(|&&b| b == self.config.nahrung_wert).count()
+        let a = self.config.nahrung_wert;
+        let b = self.config.nahrung_wert_b;
+        self.speicher.iter().filter(|&&v| v == a || v == b).count()
+    }
+
+    pub fn nahrung_a_zaehlen(&self) -> usize {
+        self.speicher.iter().filter(|&&v| v == self.config.nahrung_wert).count()
+    }
+
+    pub fn nahrung_b_zaehlen(&self) -> usize {
+        self.speicher.iter().filter(|&&v| v == self.config.nahrung_wert_b).count()
     }
 
     pub fn belegt_zaehlen(&self) -> usize {
