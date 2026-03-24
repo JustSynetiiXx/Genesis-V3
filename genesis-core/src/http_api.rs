@@ -2,7 +2,6 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::collections::HashMap;
 
-use base64::Engine;
 use serde_json::json;
 use tiny_http::{Server, Response, Header};
 
@@ -162,14 +161,29 @@ fn build_status(state: &SimState) -> serde_json::Value {
 }
 
 fn build_weltkarte(state: &SimState) -> serde_json::Value {
-    let b64 = base64::engine::general_purpose::STANDARD.encode(&state.speicher_snapshot);
-    let positionen: Vec<serde_json::Value> = state.pointer_positionen.iter().map(|&(adr, len)| {
-        json!({"adresse": adr, "laenge": len})
-    }).collect();
+    let speicher = &state.speicher_snapshot;
+    let g = speicher.len();
+    let block_size = g / 1024;
+
+    let mut weltkarte = Vec::with_capacity(1024);
+    for i in 0..1024 {
+        let start = i * block_size;
+        let end = start + block_size;
+        let non_zero = speicher[start..end].iter().filter(|&&b| b != 0).count();
+        if non_zero == 0 {
+            weltkarte.push(0);
+        } else if non_zero > block_size / 2 {
+            weltkarte.push(2);
+        } else {
+            weltkarte.push(1);
+        }
+    }
+
+    let positionen: Vec<usize> = state.pointer_positionen.iter().map(|&(adr, _)| adr).collect();
     json!({
-        "speicher_base64": b64,
-        "groesse": state.speicher_snapshot.len(),
+        "weltkarte": weltkarte,
         "pointer_positionen": positionen,
+        "groesse": g,
     })
 }
 
