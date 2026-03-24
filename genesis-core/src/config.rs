@@ -32,6 +32,9 @@ pub struct Config {
     pub fress_energie: i32,
     pub topologie: Topologie,
     pub nahrung_modus: NahrungModus,
+    pub nahrung_wert_b: u8,
+    pub nahrung_b_anteil: f32,
+    pub kopieren_braucht_b: bool,
 }
 
 impl Default for Config {
@@ -57,6 +60,9 @@ impl Default for Config {
             fress_energie: 20,
             topologie: Topologie::Linear,
             nahrung_modus: NahrungModus::Gleichverteilt,
+            nahrung_wert_b: 43,
+            nahrung_b_anteil: 0.3,
+            kopieren_braucht_b: true,
         }
     }
 }
@@ -96,6 +102,7 @@ impl Config {
                         use_gradient = true;
                     }
                 }
+                "--kein-typ-b" => { cfg.kopieren_braucht_b = false; }
                 "--oasen" => {
                     i += 1;
                     // Format: "x,y,staerke;x,y,staerke;..."
