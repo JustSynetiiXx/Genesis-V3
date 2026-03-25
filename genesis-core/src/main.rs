@@ -12,7 +12,7 @@ use rand::{Rng, SeedableRng};
 use serde_json::json;
 
 use config::Config;
-use http_api::{SimState, berechne_genom_stats, berechne_analyse, berechne_traces, start_http_server};
+use http_api::{SimState, FitnessDatapoint, berechne_genom_stats, berechne_analyse, berechne_traces, start_http_server};
 use interpreter::{abiogenese, abiogenese_grid_mitte, abiogenese_near_oase, Pointer};
 use welt::Welt;
 
@@ -49,7 +49,9 @@ fn main() {
         (Some((breite, hoehe)), None) => abiogenese_grid_mitte(&mut welt, breite, hoehe),
         _ => abiogenese(&mut welt, &mut rng),
     };
-    let mut pointer_liste: Vec<Pointer> = vec![Pointer::new(start_adr)];
+    let mut initial_pointer = Pointer::new(start_adr);
+    initial_pointer.geboren_bei_tick = 0;
+    let mut pointer_liste: Vec<Pointer> = vec![initial_pointer];
     let mut belegte_adressen: HashSet<usize> = HashSet::new();
     belegte_adressen.insert(start_adr);
 
@@ -57,6 +59,15 @@ fn main() {
     let mut geburten_gesamt: u64 = 0;
     let mut tode_gesamt: u64 = 0;
     let mut ops_zaehler: [u64; 11] = [0; 11];
+
+    // Fitness-Akkumulatoren (werden alle 2 Sekunden zurückgesetzt)
+    let mut fitness_gestationszeit_summe: u64 = 0;
+    let mut fitness_gestationszeit_count: u64 = 0;
+    let mut fitness_kopien_summe: u64 = 0;
+    let mut fitness_kinderlose_count: u64 = 0;
+    let mut fitness_tote_gesamt_interval: u64 = 0;
+    let mut fitness_geburten_interval: u64 = 0;
+    let mut fitness_ticks_interval: u64 = 0;
 
     let startzeit = Instant::now();
     let mut letzte_ausgabe = Instant::now();
@@ -86,6 +97,7 @@ fn main() {
 
     loop {
         tick += 1;
+        fitness_ticks_interval += 1;
 
         // 1. Nahrung streuen
         welt.nahrung_streuen(&mut rng);
@@ -103,6 +115,14 @@ fn main() {
 
         for p in pointer_liste.iter_mut() {
             p.tick(&mut welt, &mut rng, &mut ops_zaehler);
+
+            // Fitness-Tracking: Kopien zählen
+            if p.kopier_events > 0 {
+                if p.erste_kopie_bei_tick.is_none() {
+                    p.erste_kopie_bei_tick = Some(tick);
+                }
+                p.anzahl_kopien += p.kopier_events as u64;
+            }
 
             // Neue Pointer sammeln VOR aktiv-Check
             for &adr in &p.neue_pointer {
@@ -127,17 +147,31 @@ fn main() {
             if belegte_adressen.contains(&adr) {
                 continue;
             }
-            pointer_liste.push(Pointer::new(adr));
+            let mut neuer_pointer = Pointer::new(adr);
+            neuer_pointer.geboren_bei_tick = tick;
+            pointer_liste.push(neuer_pointer);
             belegte_adressen.insert(adr);
             geburten_gesamt += 1;
+            fitness_geburten_interval += 1;
             hinzugefuegt += 1;
         }
 
-        // 6. Inaktive entfernen
+        // 6. Inaktive entfernen + Fitness-Daten sammeln
         let vorher = pointer_liste.len();
         let mut i = 0;
         while i < pointer_liste.len() {
             if !pointer_liste[i].aktiv {
+                // Fitness-Daten vor dem Entfernen sammeln
+                let p = &pointer_liste[i];
+                fitness_tote_gesamt_interval += 1;
+                if p.anzahl_kopien > 0 {
+                    let gestationszeit = p.erste_kopie_bei_tick.unwrap() - p.geboren_bei_tick;
+                    fitness_gestationszeit_summe += gestationszeit;
+                    fitness_gestationszeit_count += 1;
+                    fitness_kopien_summe += p.anzahl_kopien;
+                } else {
+                    fitness_kinderlose_count += 1;
+                }
                 belegte_adressen.remove(&pointer_liste[i].startadresse);
                 pointer_liste.swap_remove(i);
             } else {
@@ -149,9 +183,12 @@ fn main() {
         // 7. Abiogenese
         if pointer_liste.is_empty() {
             let adr = abiogenese(&mut welt, &mut rng);
-            pointer_liste.push(Pointer::new(adr));
+            let mut neuer_pointer = Pointer::new(adr);
+            neuer_pointer.geboren_bei_tick = tick;
+            pointer_liste.push(neuer_pointer);
             belegte_adressen.insert(adr);
             geburten_gesamt += 1;
+            fitness_geburten_interval += 1;
         }
 
         // JSON-Ausgabe alle 2 Sekunden
@@ -209,6 +246,20 @@ fn main() {
                 cfg.spawn_energie, cfg.fress_energie, cfg.nahrung_wert,
             );
 
+            // Fitness-Metriken berechnen
+            let f_gestationszeit_avg = if fitness_gestationszeit_count > 0 {
+                fitness_gestationszeit_summe as f64 / fitness_gestationszeit_count as f64
+            } else { 0.0 };
+            let f_kopien_pro_leben_avg = if fitness_gestationszeit_count > 0 {
+                fitness_kopien_summe as f64 / fitness_gestationszeit_count as f64
+            } else { 0.0 };
+            let f_kinderlose_prozent = if fitness_tote_gesamt_interval > 0 {
+                (fitness_kinderlose_count as f64 / fitness_tote_gesamt_interval as f64 * 10000.0).round() / 100.0
+            } else { 0.0 };
+            let f_geburten_pro_tick = if fitness_ticks_interval > 0 {
+                (fitness_geburten_interval as f64 / fitness_ticks_interval as f64 * 10000.0).round() / 10000.0
+            } else { 0.0 };
+
             // SimState updaten
             {
                 let mut s = sim_state.lock().unwrap();
@@ -239,7 +290,37 @@ fn main() {
                 s.pointer_positionen = ptr_positionen;
                 s.analyse_ergebnis = analyse;
                 s.trace_ergebnis = traces;
+
+                // Fitness
+                s.fitness_gestationszeit_avg = (f_gestationszeit_avg * 10.0).round() / 10.0;
+                s.fitness_kopien_pro_leben_avg = (f_kopien_pro_leben_avg * 10.0).round() / 10.0;
+                s.fitness_kinderlose_prozent = f_kinderlose_prozent;
+                s.fitness_geburten_pro_tick = f_geburten_pro_tick;
+
+                // Fitness-History-Datenpunkt hinzufügen
+                let dp = FitnessDatapoint {
+                    tick,
+                    gestationszeit_avg: s.fitness_gestationszeit_avg,
+                    kopien_pro_leben_avg: s.fitness_kopien_pro_leben_avg,
+                    kinderlose_prozent: s.fitness_kinderlose_prozent,
+                    geburten_pro_tick: s.fitness_geburten_pro_tick,
+                    population: pop,
+                };
+                s.fitness_history.push(dp);
+                if s.fitness_history.len() > 500 {
+                    let remove = s.fitness_history.len() - 500;
+                    s.fitness_history.drain(..remove);
+                }
             }
+
+            // Fitness-Akkumulatoren zurücksetzen
+            fitness_gestationszeit_summe = 0;
+            fitness_gestationszeit_count = 0;
+            fitness_kopien_summe = 0;
+            fitness_kinderlose_count = 0;
+            fitness_tote_gesamt_interval = 0;
+            fitness_geburten_interval = 0;
+            fitness_ticks_interval = 0;
 
             // stdout JSON (bestehendes Format beibehalten)
             let mut ops_map = serde_json::Map::new();

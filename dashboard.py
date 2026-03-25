@@ -166,6 +166,7 @@ canvas{width:100%;background:#111;border:1px solid #222;border-radius:4px}
  <button class="active" onclick="showTab('home')">HOME</button>
  <button onclick="showTab('weltkarte')">WELTKARTE</button>
  <button onclick="showTab('population')">POPULATION</button>
+ <button onclick="showTab('fitness')">FITNESS</button>
  <button onclick="showTab('genome')">GENOME</button>
  <button onclick="showTab('analyse')">ANALYSE</button>
  <button onclick="showTab('export')">EXPORT</button>
@@ -235,6 +236,27 @@ canvas{width:100%;background:#111;border:1px solid #222;border-radius:4px}
  </div>
 </div>
 
+<!-- FITNESS -->
+<div class="panel" id="tab-fitness">
+ <div class="card">
+  <h3>Gestationszeit (Ticks bis erste Kopie)</h3>
+  <div class="chart-container"><canvas id="chart-gestationszeit" height="180"></canvas></div>
+  <div class="legend"><span><span class="legend-dot" style="background:#ff6b6b"></span> Baseline Ur-Replikator (18 Ticks)</span></div>
+ </div>
+ <div class="card">
+  <h3>Kopien pro Leben</h3>
+  <div class="chart-container"><canvas id="chart-kopien" height="180"></canvas></div>
+ </div>
+ <div class="card">
+  <h3>Kinderlose Organismen %</h3>
+  <div class="chart-container"><canvas id="chart-kinderlose" height="180"></canvas></div>
+ </div>
+ <div class="card">
+  <h3>Geburten pro Tick</h3>
+  <div class="chart-container"><canvas id="chart-geburten-tick" height="180"></canvas></div>
+ </div>
+</div>
+
 <!-- GENOME -->
 <div class="panel" id="tab-genome">
  <div class="card">
@@ -278,7 +300,7 @@ canvas{width:100%;background:#111;border:1px solid #222;border-radius:4px}
  <div class="card">
   <h3>Daten Export</h3>
   <p style="color:#888;margin-bottom:16px">Lade einen Snapshot aller aktuellen Daten herunter.</p>
-  <button class="btn" onclick="exportJSON()">JSON Snapshot</button>
+  <button class="btn" onclick="exportJSON()">Export JSON</button>
   <button class="btn" onclick="exportSpeicher()">Speicher-Dump (Base64)</button>
  </div>
  <div class="card">
@@ -291,6 +313,8 @@ canvas{width:100%;background:#111;border:1px solid #222;border-radius:4px}
   <div class="stat-row"><span class="stat-label">Analyse</span><span class="stat-value">GET /api/analyse</span></div>
   <div class="stat-row"><span class="stat-label">Analyse Export</span><span class="stat-value">GET /api/export_analyse</span></div>
   <div class="stat-row"><span class="stat-label">Trace</span><span class="stat-value">GET /api/trace</span></div>
+  <div class="stat-row"><span class="stat-label">Fitness History</span><span class="stat-value">GET /api/fitness_history</span></div>
+  <div class="stat-row"><span class="stat-label">Full Export</span><span class="stat-value">GET /api/export_full</span></div>
  </div>
 </div>
 </div>
@@ -306,9 +330,10 @@ function showTab(name){
  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
  document.getElementById('tab-'+name).classList.add('active');
  document.querySelectorAll('.tabs button').forEach((b,i)=>{
-  b.classList.toggle('active',['home','weltkarte','population','genome','analyse','export'][i]===name);
+  b.classList.toggle('active',['home','weltkarte','population','fitness','genome','analyse','export'][i]===name);
  });
  if(name==='population')drawCharts();
+ if(name==='fitness')drawFitnessCharts();
  if(name==='analyse'){traceLoaded=false;loadTrace();}
 }
 async function loadTrace(){
@@ -525,6 +550,75 @@ function drawCharts(){
  drawLine(ctx4,c4.width,c4.height,data,'genom_laenge_avg','#00ffcc');
 }
 
+const UR_REPLIKATOR_GESTATIONSZEIT=18;
+async function drawFitnessCharts(){
+ try{
+  let res=await fetch('/api/fitness_history');
+  let d=await res.json();
+  let data=d.datenpunkte||[];
+  if(!data.length)return;
+
+  // Gestationszeit
+  let c1=document.getElementById('chart-gestationszeit');
+  let ctx1=c1.getContext('2d');
+  c1.width=c1.offsetWidth;c1.height=180;
+  ctx1.clearRect(0,0,c1.width,c1.height);
+  let vals1=data.map(d=>d.gestationszeit_avg||0);
+  let max1=Math.max(1,...vals1,UR_REPLIKATOR_GESTATIONSZEIT*2);
+  drawFitnessLine(ctx1,c1.width,c1.height,data,vals1,max1,'#00ffcc');
+  // Baseline
+  let baseY=c1.height-((UR_REPLIKATOR_GESTATIONSZEIT/max1)*c1.height*0.85)-c1.height*0.05;
+  ctx1.strokeStyle='#ff6b6b';ctx1.lineWidth=1;ctx1.setLineDash([5,5]);
+  ctx1.beginPath();ctx1.moveTo(0,baseY);ctx1.lineTo(c1.width,baseY);ctx1.stroke();
+  ctx1.setLineDash([]);
+
+  // Kopien pro Leben
+  let c2=document.getElementById('chart-kopien');
+  let ctx2=c2.getContext('2d');
+  c2.width=c2.offsetWidth;c2.height=180;
+  ctx2.clearRect(0,0,c2.width,c2.height);
+  let vals2=data.map(d=>d.kopien_pro_leben_avg||0);
+  let max2=Math.max(1,...vals2);
+  drawFitnessLine(ctx2,c2.width,c2.height,data,vals2,max2,'#00ffcc');
+
+  // Kinderlose %
+  let c3=document.getElementById('chart-kinderlose');
+  let ctx3=c3.getContext('2d');
+  c3.width=c3.offsetWidth;c3.height=180;
+  ctx3.clearRect(0,0,c3.width,c3.height);
+  let vals3=data.map(d=>d.kinderlose_prozent||0);
+  drawFitnessLine(ctx3,c3.width,c3.height,data,vals3,100,'#ff6b6b');
+
+  // Geburten pro Tick
+  let c4=document.getElementById('chart-geburten-tick');
+  let ctx4=c4.getContext('2d');
+  c4.width=c4.offsetWidth;c4.height=180;
+  ctx4.clearRect(0,0,c4.width,c4.height);
+  let vals4=data.map(d=>d.geburten_pro_tick||0);
+  let max4=Math.max(1,...vals4);
+  drawFitnessLine(ctx4,c4.width,c4.height,data,vals4,max4,'#00ffcc');
+ }catch(e){}
+}
+function drawFitnessLine(ctx,w,h,data,vals,maxV,color){
+ if(!vals.length)return;
+ ctx.strokeStyle=color;ctx.lineWidth=2;ctx.beginPath();
+ for(let i=0;i<vals.length;i++){
+  let x=(i/(vals.length-1||1))*w;
+  let y=h-((vals[i]/maxV)*h*0.85)-h*0.05;
+  if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);
+ }
+ ctx.stroke();
+ ctx.fillStyle='#666';ctx.font='10px monospace';
+ ctx.fillText(Math.round(maxV*10)/10,4,14);
+ ctx.fillText('0',4,h-4);
+ if(data.length>0){
+  ctx.fillText('T'+fmt(data[0].tick),4,h-14);
+  ctx.textAlign='right';
+  ctx.fillText('T'+fmt(data[data.length-1].tick),w-4,h-14);
+  ctx.textAlign='left';
+ }
+}
+
 function blobDownload(data,filename){
  let str=JSON.stringify(data,null,2);
  let blob=new Blob([str],{type:'application/json'});
@@ -538,9 +632,10 @@ function blobDownload(data,filename){
 
 async function exportJSON(){
  try{
-  let res=await fetch('/api/export');
+  let res=await fetch('/api/export_full');
   let data=await res.json();
-  blobDownload(data,'genesis_export.json');
+  let tick=data.tick_nummer||0;
+  blobDownload(data,'genesis_export_'+tick+'.json');
  }catch(e){alert('Export fehlgeschlagen');}
 }
 
@@ -597,6 +692,7 @@ async function refresh(){
    updateWeltkarte(w);
   }
   if(currentTab==='population')drawCharts();
+  if(currentTab==='fitness')drawFitnessCharts();
  }catch(e){
   document.getElementById('hdr-status').textContent='Verbindungsfehler';
  }
@@ -684,6 +780,12 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
         elif path == "/api/trace":
             self._json_response(fetch_rust("/api/trace"))
+
+        elif path == "/api/fitness_history":
+            self._json_response(fetch_rust("/api/fitness_history"))
+
+        elif path == "/api/export_full":
+            self._json_response(fetch_rust("/api/export_full"))
 
         elif path == "/api/export_analyse":
             ergebnis = {"anzahl": 0, "gesamt": 0, "prozent": 0, "top5": [], "meilensteine": []}

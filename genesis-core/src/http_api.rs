@@ -46,6 +46,23 @@ pub struct SimState {
     // Analyse
     pub analyse_ergebnis: serde_json::Value,
     pub trace_ergebnis: serde_json::Value,
+
+    // Fitness
+    pub fitness_gestationszeit_avg: f64,
+    pub fitness_kopien_pro_leben_avg: f64,
+    pub fitness_kinderlose_prozent: f64,
+    pub fitness_geburten_pro_tick: f64,
+    pub fitness_history: Vec<FitnessDatapoint>,
+}
+
+#[derive(Clone, serde::Serialize)]
+pub struct FitnessDatapoint {
+    pub tick: u64,
+    pub gestationszeit_avg: f64,
+    pub kopien_pro_leben_avg: f64,
+    pub kinderlose_prozent: f64,
+    pub geburten_pro_tick: f64,
+    pub population: usize,
 }
 
 #[derive(Clone)]
@@ -86,6 +103,11 @@ impl SimState {
             pointer_positionen: Vec::new(),
             analyse_ergebnis: json!({"anzahl": 0, "gesamt": 0, "prozent": 0.0, "top5": [], "meilensteine": []}),
             trace_ergebnis: json!({"traces": []}),
+            fitness_gestationszeit_avg: 0.0,
+            fitness_kopien_pro_leben_avg: 0.0,
+            fitness_kinderlose_prozent: 0.0,
+            fitness_geburten_pro_tick: 0.0,
+            fitness_history: Vec::new(),
         }
     }
 }
@@ -143,6 +165,10 @@ fn build_export(state: &SimState) -> serde_json::Value {
         "ausgefuehrte_ops_total": state.ausgefuehrte_ops_total,
         "top_genome": genome_to_json(&state.top_genome),
         "operations_verteilung": ops_to_json(&state.operations_verteilung),
+        "fitness_gestationszeit_avg": state.fitness_gestationszeit_avg,
+        "fitness_kopien_pro_leben_avg": state.fitness_kopien_pro_leben_avg,
+        "fitness_kinderlose_prozent": state.fitness_kinderlose_prozent,
+        "fitness_geburten_pro_tick": state.fitness_geburten_pro_tick,
     })
 }
 
@@ -169,6 +195,10 @@ fn build_status(state: &SimState) -> serde_json::Value {
         "laufzeit_sekunden": state.laufzeit_sekunden,
         "ausgefuehrte_ops": ops_to_json(&state.ausgefuehrte_ops),
         "ausgefuehrte_ops_total": state.ausgefuehrte_ops_total,
+        "fitness_gestationszeit_avg": state.fitness_gestationszeit_avg,
+        "fitness_kopien_pro_leben_avg": state.fitness_kopien_pro_leben_avg,
+        "fitness_kinderlose_prozent": state.fitness_kinderlose_prozent,
+        "fitness_geburten_pro_tick": state.fitness_geburten_pro_tick,
     })
 }
 
@@ -249,6 +279,40 @@ pub fn start_http_server(state: Arc<Mutex<SimState>>) {
                 "/api/trace" => {
                     let s = state.lock().unwrap();
                     let data = s.trace_ergebnis.clone();
+                    drop(s);
+                    let _ = request.respond(json_response(data));
+                }
+                "/api/fitness_history" => {
+                    let s = state.lock().unwrap();
+                    let datenpunkte: Vec<serde_json::Value> = s.fitness_history.iter().map(|dp| {
+                        json!({
+                            "tick": dp.tick,
+                            "gestationszeit_avg": dp.gestationszeit_avg,
+                            "kopien_pro_leben_avg": dp.kopien_pro_leben_avg,
+                            "kinderlose_prozent": dp.kinderlose_prozent,
+                            "geburten_pro_tick": dp.geburten_pro_tick,
+                            "population": dp.population,
+                        })
+                    }).collect();
+                    drop(s);
+                    let _ = request.respond(json_response(json!({"datenpunkte": datenpunkte})));
+                }
+                "/api/export_full" => {
+                    let s = state.lock().unwrap();
+                    let mut data = build_export(&s);
+                    let datenpunkte: Vec<serde_json::Value> = s.fitness_history.iter().map(|dp| {
+                        json!({
+                            "tick": dp.tick,
+                            "gestationszeit_avg": dp.gestationszeit_avg,
+                            "kopien_pro_leben_avg": dp.kopien_pro_leben_avg,
+                            "kinderlose_prozent": dp.kinderlose_prozent,
+                            "geburten_pro_tick": dp.geburten_pro_tick,
+                            "population": dp.population,
+                        })
+                    }).collect();
+                    if let serde_json::Value::Object(ref mut map) = data {
+                        map.insert("fitness_history".to_string(), json!(datenpunkte));
+                    }
                     drop(s);
                     let _ = request.respond(json_response(data));
                 }

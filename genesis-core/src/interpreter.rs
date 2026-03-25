@@ -35,6 +35,9 @@ pub struct Pointer {
     pub mutationen: Vec<(usize, u64, u64, u8, u8)>,
     pub kopier_events: usize,
     pub kopierbereit: bool,
+    pub geboren_bei_tick: u64,
+    pub erste_kopie_bei_tick: Option<u64>,
+    pub anzahl_kopien: u64,
 }
 
 impl Pointer {
@@ -51,6 +54,9 @@ impl Pointer {
             mutationen: Vec::new(),
             kopier_events: 0,
             kopierbereit: false,
+            geboren_bei_tick: 0,
+            erste_kopie_bei_tick: None,
+            anzahl_kopien: 0,
         }
     }
 
