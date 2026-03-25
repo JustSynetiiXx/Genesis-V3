@@ -200,6 +200,10 @@ canvas{width:100%;background:#111;border:1px solid #222;border-radius:4px}
   <div class="stat-row"><span class="stat-label">Genom Max</span><span class="stat-value" id="h-genommax">—</span></div>
   <div class="stat-row" id="h-blitz-row" style="display:none"><span class="stat-label">Letzter Blitz</span><span class="stat-value" id="h-blitz" style="color:#ff6b6b">—</span></div>
  </div>
+ <div class="card" style="margin-top:12px">
+  <h3>Todesursachen (letztes 2s-Fenster)</h3>
+  <div id="todesursachen-bars"><div style="color:#666">Keine Daten</div></div>
+ </div>
 </div>
 
 <!-- WELTKARTE -->
@@ -404,6 +408,43 @@ function updateHome(d){
   document.getElementById('h-blitz-row').style.display='';
   document.getElementById('h-blitz').textContent='Tick '+fmt(d.letzter_blitz.tick)+' ('+d.letzter_blitz.population_vor+' Org. vorher)';
  }
+ updateTodesursachen(d);
+}
+
+function updateTodesursachen(d){
+ let gesamt=d.tode_gesamt_im_fenster||0;
+ let el=document.getElementById('todesursachen-bars');
+ if(gesamt===0){el.innerHTML='<div style="color:#666">Keine Tode im letzten Fenster</div>';return;}
+ let ursachen=[
+  {label:'Energie verbraucht',val:d.tode_energie||0,color:'#ff6b6b'},
+  {label:'Leerlauf-Tod',val:d.tode_leerlauf||0,color:'#ff9944'},
+  {label:'ENDE-Opcode',val:d.tode_ende||0,color:'#00ffcc'},
+  {label:'Adresse ungueltig',val:d.tode_adresse||0,color:'#6b6bff'},
+ ];
+ let html='';
+ ursachen.forEach(u=>{
+  let pct=gesamt>0?(u.val/gesamt*100).toFixed(1):'0.0';
+  html+='<div class="bar-container">';
+  html+='<span class="bar-label" style="width:130px">'+u.label+'</span>';
+  html+='<div class="bar-track"><div class="bar-fill" style="width:'+pct+'%;background:'+u.color+'"></div></div>';
+  html+='<span class="bar-value" style="width:80px">'+fmt(u.val)+' ('+pct+'%)</span>';
+  html+='</div>';
+ });
+ html+='<div style="border-top:1px solid #333;margin:8px 0"></div>';
+ let extras=[
+  {label:'Ohne Typ B gestorben',val:d.tode_ohne_typ_b||0},
+  {label:'Kopierversuch ohne B',val:d.tode_kopier_versuch_ohne_typ_b||0},
+  {label:'Kopierversuch kein Platz',val:d.tode_kopier_versuch_kein_platz||0},
+ ];
+ extras.forEach(u=>{
+  let pct=gesamt>0?(u.val/gesamt*100).toFixed(1):'0.0';
+  html+='<div class="bar-container">';
+  html+='<span class="bar-label" style="width:130px">'+u.label+'</span>';
+  html+='<div class="bar-track"><div class="bar-fill" style="width:'+pct+'%;background:#888"></div></div>';
+  html+='<span class="bar-value" style="width:80px">'+fmt(u.val)+' ('+pct+'%)</span>';
+  html+='</div>';
+ });
+ el.innerHTML=html;
 }
 
 function updateWeltkarte(d){

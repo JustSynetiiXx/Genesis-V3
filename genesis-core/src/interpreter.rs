@@ -1,6 +1,14 @@
 use rand::Rng;
 use crate::welt::Welt;
 
+#[derive(Clone, Copy, Debug)]
+pub enum Todesursache {
+    EnergieVerbraucht,
+    LeerlaufTod,
+    EndeOpcode,
+    AdresseUngueltig,
+}
+
 // Ur-Replikator: exakt aus Python erzeuge_ur_replikator() extrahiert
 pub const UR_REPLIKATOR: [u8; 72] = [
     0x06, 0x03, 0x00, 0x02,  //  0: LESEN_EXT R3 → R2
@@ -38,6 +46,9 @@ pub struct Pointer {
     pub geboren_bei_tick: u64,
     pub erste_kopie_bei_tick: Option<u64>,
     pub anzahl_kopien: u64,
+    pub todesursache: Option<Todesursache>,
+    pub kopier_versuche_ohne_typ_b: u64,
+    pub kopier_versuche_kein_platz: u64,
 }
 
 impl Pointer {
@@ -57,6 +68,9 @@ impl Pointer {
             geboren_bei_tick: 0,
             erste_kopie_bei_tick: None,
             anzahl_kopien: 0,
+            todesursache: None,
+            kopier_versuche_ohne_typ_b: 0,
+            kopier_versuche_kein_platz: 0,
         }
     }
 
@@ -83,6 +97,9 @@ impl Pointer {
         let neue_pointer = &mut self.neue_pointer;
         let mutationen = &mut self.mutationen;
         let mut kopier_events: usize = 0;
+        let mut todesursache: Option<Todesursache> = None;
+        let mut kopier_versuche_ohne_typ_b: u64 = 0;
+        let mut kopier_versuche_kein_platz: u64 = 0;
 
         // Zellende scannen
         let mut zellende = startadresse;
@@ -142,6 +159,7 @@ impl Pointer {
                         let new_addr = adresse as i64 + (sprung as i64) * 4;
                         if new_addr < 0 || new_addr >= groesse as i64 {
                             aktiv = false;
+                            todesursache = Some(Todesursache::AdresseUngueltig);
                             break;
                         }
                         adresse = new_addr as usize;
@@ -153,9 +171,10 @@ impl Pointer {
                     sinnvolle_ops += 1;
                     // Gate: kopierbereit muss gesetzt sein (wenn Typ B aktiv)
                     if kopieren_braucht_b && !kopierbereit {
+                        kopier_versuche_ohne_typ_b += 1;
                         // Versuch kostet 1 Energie (bereits abgezogen)
                         adresse += 4;
-                        if adresse >= groesse { aktiv = false; break; }
+                        if adresse >= groesse { aktiv = false; todesursache = Some(Todesursache::AdresseUngueltig); break; }
                         continue;
                     }
                     let mut anzahl = std::cmp::min(r[(arg1 % 4) as usize] as usize, 1024);
@@ -167,6 +186,7 @@ impl Pointer {
                         kopier_kosten = std::cmp::max(anzahl / cfg.kopier_kosten_divisor, 1) as i32;
                     }
                     energie -= kopier_kosten;
+                    let mut bytes_kopiert: usize = 0;
                     for i in 0..anzahl {
                         let ziel_pos = ((ziel_adr as usize) + i) % groesse;
                         if speicher[ziel_pos] != 0 && speicher[ziel_pos] != nahrung_wert && speicher[ziel_pos] != nahrung_wert_b {
@@ -182,6 +202,10 @@ impl Pointer {
                             }
                         }
                         speicher[ziel_pos] = byte_val;
+                        bytes_kopiert += 1;
+                    }
+                    if anzahl >= cfg.min_kopier_groesse && bytes_kopiert == 0 {
+                        kopier_versuche_kein_platz += 1;
                     }
                     if anzahl >= cfg.min_kopier_groesse {
                         neue_pointer.push((ziel_adr as usize) % groesse);
@@ -229,6 +253,7 @@ impl Pointer {
 
                 9 => { // ENDE
                     aktiv = false;
+                    todesursache = Some(Todesursache::EndeOpcode);
                     break;
                 }
 
@@ -254,6 +279,7 @@ impl Pointer {
             adresse += 4;
             if adresse >= groesse {
                 aktiv = false;
+                todesursache = Some(Todesursache::AdresseUngueltig);
                 break;
             }
         }
@@ -264,6 +290,11 @@ impl Pointer {
         self.energie = energie;
         self.kopier_events = kopier_events;
         self.kopierbereit = kopierbereit;
+        if todesursache.is_some() {
+            self.todesursache = todesursache;
+        }
+        self.kopier_versuche_ohne_typ_b += kopier_versuche_ohne_typ_b;
+        self.kopier_versuche_kein_platz += kopier_versuche_kein_platz;
         if sinnvolle_ops == 0 {
             self.leerlauf_ticks += 1;
         } else {

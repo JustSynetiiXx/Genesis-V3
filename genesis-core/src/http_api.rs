@@ -53,6 +53,16 @@ pub struct SimState {
     pub fitness_kinderlose_prozent: f64,
     pub fitness_geburten_pro_tick: f64,
     pub fitness_history: Vec<FitnessDatapoint>,
+
+    // Todesursachen (pro 2-Sekunden-Fenster)
+    pub tode_energie: u64,
+    pub tode_leerlauf: u64,
+    pub tode_ende: u64,
+    pub tode_adresse: u64,
+    pub tode_ohne_typ_b: u64,
+    pub tode_kopier_versuch_ohne_typ_b: u64,
+    pub tode_kopier_versuch_kein_platz: u64,
+    pub tode_gesamt_im_fenster: u64,
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -108,6 +118,14 @@ impl SimState {
             fitness_kinderlose_prozent: 0.0,
             fitness_geburten_pro_tick: 0.0,
             fitness_history: Vec::new(),
+            tode_energie: 0,
+            tode_leerlauf: 0,
+            tode_ende: 0,
+            tode_adresse: 0,
+            tode_ohne_typ_b: 0,
+            tode_kopier_versuch_ohne_typ_b: 0,
+            tode_kopier_versuch_kein_platz: 0,
+            tode_gesamt_im_fenster: 0,
         }
     }
 }
@@ -169,6 +187,14 @@ fn build_export(state: &SimState) -> serde_json::Value {
         "fitness_kopien_pro_leben_avg": state.fitness_kopien_pro_leben_avg,
         "fitness_kinderlose_prozent": state.fitness_kinderlose_prozent,
         "fitness_geburten_pro_tick": state.fitness_geburten_pro_tick,
+        "tode_energie": state.tode_energie,
+        "tode_leerlauf": state.tode_leerlauf,
+        "tode_ende": state.tode_ende,
+        "tode_adresse": state.tode_adresse,
+        "tode_ohne_typ_b": state.tode_ohne_typ_b,
+        "tode_kopier_versuch_ohne_typ_b": state.tode_kopier_versuch_ohne_typ_b,
+        "tode_kopier_versuch_kein_platz": state.tode_kopier_versuch_kein_platz,
+        "tode_gesamt_im_fenster": state.tode_gesamt_im_fenster,
     })
 }
 
@@ -199,6 +225,14 @@ fn build_status(state: &SimState) -> serde_json::Value {
         "fitness_kopien_pro_leben_avg": state.fitness_kopien_pro_leben_avg,
         "fitness_kinderlose_prozent": state.fitness_kinderlose_prozent,
         "fitness_geburten_pro_tick": state.fitness_geburten_pro_tick,
+        "tode_energie": state.tode_energie,
+        "tode_leerlauf": state.tode_leerlauf,
+        "tode_ende": state.tode_ende,
+        "tode_adresse": state.tode_adresse,
+        "tode_ohne_typ_b": state.tode_ohne_typ_b,
+        "tode_kopier_versuch_ohne_typ_b": state.tode_kopier_versuch_ohne_typ_b,
+        "tode_kopier_versuch_kein_platz": state.tode_kopier_versuch_kein_platz,
+        "tode_gesamt_im_fenster": state.tode_gesamt_im_fenster,
     })
 }
 
